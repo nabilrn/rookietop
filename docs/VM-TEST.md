@@ -1,6 +1,6 @@
 # RookieTop Alpha VM Test
 
-This checklist qualifies the current `0.1.0-alpha.6` Linux build on a real VM.
+This checklist qualifies `0.1.0-alpha.7` on a real Linux VM.
 
 ## 1. Record the environment
 
@@ -13,8 +13,6 @@ df -h /
 cat /proc/loadavg
 ```
 
-Keep the distro, kernel, CPU count, RAM, and root filesystem size with the test notes.
-
 ## 2. Build and automated checks
 
 ```sh
@@ -23,197 +21,178 @@ cd rookietop
 make clean check
 ```
 
-Expected: strict compilation and all tests pass. The suite includes collector/parser tests, live process inspection, guarded signalling, and the static teaching catalog.
+Expected: strict compilation and all collector, process, teaching, diagnosis, and signal-safety tests pass.
 
-## 3. One-shot smoke test
-
-```sh
-./rookietop --once
-```
-
-Check that CPU, memory, root disk, network, and the primary insight render without root privileges.
-
-## 4. Teaching-first overview
+## 3. Overview copy and diagnosis
 
 ```sh
 ./rookietop
 ```
 
-Expected:
+Check that:
 
-- alternate full-screen terminal buffer is used
-- shell and terminal input mode are restored on exit
-- the overview visibly presents RookieTop as learning from this machine, not only as a metric dashboard
-- `UNDERSTAND` prompts the user to ask why metrics work the way they do
-- `[?] Learn` is visually discoverable in the action bar
+- the default screen uses plain language rather than teaching jargon
+- `WHAT ROOKIETOP NOTICES` contains one short headline and one evidence-based detail
+- a healthy machine says that nothing looks constrained rather than dumping technical definitions
+- `[?] Explain` is visible but technical detail is not forced into the default view
 - `p` still opens Process Explorer
 
-## 5. Lesson browser
+## 4. CPU context
 
-From the overview press `?` or `l`.
-
-Expected:
-
-- `LEARN LINUX WITH YOUR SYSTEM` opens
-- current CPU, memory, disk, and load context is shown when available
-- Up/Down changes the selected lesson
-- Enter opens the selected lesson
-- lessons exist for CPU, Linux memory, load average, processes, PID, process state, signals, filesystem space, and network throughput
-- Esc returns to the previous screen
-
-## 6. WHAT / WHY / HOW / TRY contract
-
-Open several lessons, especially CPU, memory, and load.
-
-Every lesson must visibly contain:
-
-```text
-WHAT
-WHY IT MATTERS
-HOW LINUX / ROOKIETOP KNOWS
-TRY IT YOURSELF
-```
-
-Check that the lesson also names its real data source. Examples:
-
-- CPU -> `/proc/stat`
-- memory -> `/proc/meminfo`
-- load -> `/proc/loadavg`
-- disk -> `statvfs("/")`
-- network -> `/proc/net/dev`
-
-Use `n` and `b` to move between lessons.
-
-## 7. CPU teaching experiment
-
-Open the CPU lesson. In another shell:
+In another shell:
 
 ```sh
 yes > /dev/null &
 LOAD_PID=$!
 ```
 
-Return to the overview after observing the lesson and watch CPU usage. Then stop the test:
+Watch the overview for several refreshes, then stop it:
 
 ```sh
 kill "$LOAD_PID"
 ```
 
-Expected: the experiment described by RookieTop makes the monitored value visibly change. The lesson should make clear that CPU percentage is calculated from cumulative `/proc/stat` counter deltas.
+Expected when CPU becomes high:
 
-## 8. Memory teaching sanity check
+- RookieTop says the CPUs are busy
+- if one visible process clearly contributes enough CPU, its name appears in the explanation
+- wording says this is a short sample and does not claim a permanent root cause
+- pressing `?` opens the lesson browser with CPU preselected
 
-Open the memory lesson and compare it with:
+## 5. Memory context
+
+Compare RookieTop with:
 
 ```sh
 grep -E 'MemTotal|MemAvailable|MemFree|Cached' /proc/meminfo
 ```
 
-Expected: RookieTop teaches that used RAM is not equivalent to memory pressure and that `MemAvailable` is more useful than treating `MemFree` as all usable memory.
+If memory pressure is naturally high, the explanation may name the largest visible memory user. It must not claim that one process explains all system memory use.
 
-## 9. Process Explorer as teaching UI
+Do not intentionally exhaust a small VM just to trigger the threshold.
 
-Press `p`.
+## 6. Load context
 
-Check:
-
-- column label is `MEM MiB` instead of unexplained `RSS MiB`
-- raw process state `S` is shown as `Sleeping`, `R` as `Running`, etc.
-- the selected process has a visible `LEARN SELECTED` area
-- the selected state is explained in plain language; `Sleeping` should not be framed as an error
-- `? Explain`, `Enter Inspect`, `k Safe Stop`, and `K Force Kill` are clearly discoverable
-- `m`, `p`, and `n` still sort by memory, PID, and name
-
-## 10. Contextual process lesson
-
-Select a stable process and press `?`.
-
-Expected:
-
-- the lesson uses the actual selected process name, PID, state, RSS, and thread count
-- WHAT explains a process and PID
-- WHY explains the selected process state
-- HOW points to `/proc/<pid>/status`, `/proc/<pid>/stat`, and `/proc/<pid>/cmdline`
-- TRY asks the user to inspect `/proc/<pid>/status` manually
-
-In another shell, run the suggested command using the same PID and compare `State`, `Threads`, and `VmRSS` with RookieTop.
-
-## 11. Process Inspector
-
-Return to Process Explorer, select a process, and press Enter.
-
-Expected:
-
-- PID, status, memory, and threads include inline beginner meaning
-- command line is displayed
-- procfs paths used by RookieTop are shown explicitly
-- the screen explains why process start time matters for PID reuse protection
-- `?` opens the contextual process lesson
-
-## 12. Safe Stop teaching
-
-Create a disposable process:
-
-```sh
-sleep 300 &
-TEST_PID=$!
-echo "$TEST_PID"
-```
-
-Select it in Process Explorer and press `k`.
-
-Before confirming, verify the screen explains:
-
-- SIGTERM requests graceful shutdown
-- software may clean up before exiting
-- RookieTop calls `kill(2)` directly
-- PID + start time are verified first
-- RookieTop will not auto-escalate to SIGKILL
-
-Press `y`. The disposable process should exit.
-
-## 13. Force Kill teaching
-
-Use only a disposable process that ignores SIGTERM:
-
-```sh
-python3 -c 'import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(300)' &
-TEST_PID=$!
-echo "$TEST_PID"
-```
-
-Try `k` + `y` first. The process should remain alive. Re-select it and press uppercase `K`.
-
-Expected: the Force Kill confirmation clearly states that SIGKILL is immediate, cannot be caught, and skips cleanup. Only explicit `y` sends it.
-
-## 14. Load-average behavior
-
-Compare RookieTop with:
+Compare:
 
 ```sh
 cat /proc/loadavg
 nproc
 ```
 
-Expected: load values match closely and the lesson describes load as queue pressure relative to CPU count, not another CPU percentage.
+Expected:
 
-## 15. Network, thermal, and disk regression checks
+- high load with low CPU is described as possibly involving I/O or other waiting work
+- high load with busy CPU is described as possible CPU queueing
+- RookieTop never presents load as another CPU percentage
 
-Generate a normal download/package update and verify network rate moves and falls again.
+## 7. Process Explorer copy
 
-Check optional thermal exposure:
+Press `p`.
+
+Expected:
+
+- the header says to pick a process and see what it is doing
+- the selected area is called `ABOUT THIS PROCESS`, not `LEARN SELECTED`
+- state labels are readable (`Sleeping`, `Running`, `Waiting I/O`, etc.)
+- technical terms such as RSS and procfs internals are not required to understand the default list
+- the selected state gets one short plain-language explanation
+- `[?] Explain`, `[Enter] Details`, `[k] Stop safely`, and `[K] Force kill` are discoverable
+
+## 8. Process detail -> explanation progression
+
+Select a stable process and press Enter.
+
+The detail screen should show only useful basics first:
+
+- PID
+- state
+- memory
+- thread count
+- command
+- a short `WHAT THIS TELLS YOU` explanation
+
+Press `?`.
+
+Only then should RookieTop expose deeper Linux details such as:
+
+- `/proc/<pid>/status`
+- `/proc/<pid>/stat`
+- `/proc/<pid>/cmdline`
+- PID reuse and process start time
+- `VmRSS`
+
+Run the suggested command manually and compare the values:
 
 ```sh
-ls /sys/class/thermal/thermal_zone*/temp 2>/dev/null
+cat /proc/<pid>/status
 ```
 
-Compare root filesystem capacity:
+## 9. Safe Stop wording
+
+Create a disposable process:
 
 ```sh
+sleep 300 &
+TEST_PID=$!
+```
+
+Find it and press `k`.
+
+Expected copy:
+
+- explains that RookieTop will ask the process to exit cleanly
+- explains that it gets a chance to finish work and clean up
+- shows `Linux signal: SIGTERM` as secondary technical context
+- confirms with wording similar to `Stop it` / `Keep running`
+
+Confirm and verify the process exits.
+
+## 10. Force Kill wording
+
+Use only a disposable process that ignores SIGTERM:
+
+```sh
+python3 -c 'import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(300)' &
+TEST_PID=$!
+```
+
+Try Safe Stop first, then uppercase `K`.
+
+Expected:
+
+- warning says the process ends immediately and cannot clean up first
+- `SIGKILL` is shown as the Linux signal
+- Force Kill remains a separate explicit confirmation
+- no automatic escalation and no automatic sudo occurs
+
+## 11. Lesson copy
+
+Press `?` from overview and open CPU, memory, and load.
+
+Each lesson should use this progression:
+
+```text
+ON YOUR MACHINE
+WHAT IT MEANS
+WHEN TO CARE
+HOW LINUX SHOWS IT
+TRY IT
+```
+
+The lesson should sound conversational while still naming the real Linux source.
+
+## 12. Regression checks
+
+Verify:
+
+```sh
+./rookietop --once
+NO_COLOR=1 ./rookietop --once
 df -h /
 ```
 
-Missing thermal zones must remain non-fatal.
+Also generate normal network traffic and confirm RX/TX still changes. Missing thermal zones must remain non-fatal.
 
 ## Report back
 
@@ -221,15 +200,13 @@ Record:
 
 - distro and kernel
 - `make clean check` result
-- screenshot of teaching-first overview
-- screenshot of lesson browser and one full WHAT/WHY/HOW/TRY lesson
-- screenshot of Process Explorer with `LEARN SELECTED`
-- whether process-state wording feels understandable without prior Linux knowledge
-- whether `/proc/<pid>/status` manual comparison works
-- whether Safe Stop and Force Kill explanations are clear before confirmation
-- whether confirmed SIGTERM/SIGKILL tests behave as expected
-- any layout overlap, clipped lesson text, or confusing shortcut
-- any mismatch against `/proc`, `free -h`, `df -h /`, or observed traffic
+- screenshot of the alpha.7 overview
+- screenshot of Process Explorer and `ABOUT THIS PROCESS`
+- screenshot of one `? Explain` process view
+- whether CPU diagnosis names the `yes` process when load is generated
+- whether the copy feels understandable before seeing Linux terminology
+- any layout overlap or clipped text
+- any metric mismatch against `/proc`, `free -h`, or `df -h /`
 
 ## Known alpha limitations
 
@@ -238,8 +215,7 @@ Record:
 - root filesystem only
 - network is aggregated across non-loopback interfaces
 - thermal depends on sysfs exposure and is often unavailable in VMs
-- Top CPU uses a short sample and total-machine share semantics
+- contextual diagnosis uses short live samples and conservative heuristics; it is not a root-cause oracle
 - Process Explorer does not yet have name search/filter or an all-process CPU column
-- teaching lessons are static content enriched with live values; context-aware root-cause diagnosis is not implemented yet
-- no lesson progress persistence
-- thresholds are conservative heuristics, not failure diagnosis
+- no guided-lab completion state
+- no final dedicated TUI mockup implementation yet
