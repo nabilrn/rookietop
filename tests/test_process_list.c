@@ -1,3 +1,5 @@
+#define _POSIX_C_SOURCE 200809L
+
 #include "process_list.h"
 
 #include <signal.h>
