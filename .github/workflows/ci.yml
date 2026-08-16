@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        cc: [gcc, clang]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build and smoke test
+        run: make CC=${{ matrix.cc }} clean check
+
+      - name: Sanitizer build and smoke test
+        if: matrix.cc == 'gcc'
+        run: |
+          make clean
+          make CC=gcc debug
+          ./rookietop --help >/dev/null
+          ./rookietop --version >/dev/null
