@@ -8,6 +8,7 @@
 #include "process.h"
 #include "process_cpu.h"
 #include "process_list.h"
+#include "teaching.h"
 #include "terminal_input.h"
 
 #include <errno.h>
@@ -20,20 +21,18 @@
 #include <time.h>
 #include <unistd.h>
 
-#define ROOKIETOP_VERSION "0.1.0-alpha.5"
+#define ROOKIETOP_VERSION "0.1.0-alpha.6"
 #define SAMPLE_NS 250000000L
-#define FRAME_WAIT_MS 750
+#define FRAME_WAIT_MS 700
 #define PROCESS_WAIT_MS 900
 #define KIB_PER_GIB 1048576.0
 #define KIB_PER_MIB 1024.0
 #define BYTES_PER_GIB 1073741824.0
 #define BYTES_PER_MIB 1048576.0
 #define TOP_PROCESS_COUNT 8
-#define COMPACT_PROCESS_COUNT 3
-#define COMPACT_BAR_WIDTH 18
+#define HISTORY_MAX 90
 #define MIN_FULL_COLS 100
 #define MIN_FULL_ROWS 32
-#define HISTORY_MAX 90
 
 #define ANSI_RESET "\033[0m"
 #define ANSI_BOLD "\033[1m"
@@ -41,6 +40,7 @@
 #define ANSI_GREEN "\033[32m"
 #define ANSI_YELLOW "\033[33m"
 #define ANSI_RED "\033[31m"
+#define ANSI_CYAN "\033[36m"
 #define ANSI_REVERSE "\033[7m"
 
 struct overview {
@@ -82,6 +82,9 @@ enum app_screen {
     SCREEN_OVERVIEW,
     SCREEN_PROCESSES,
     SCREEN_DETAIL,
+    SCREEN_PROCESS_LEARN,
+    SCREEN_LEARN_MENU,
+    SCREEN_LEARN_TOPIC,
     SCREEN_CONFIRM_TERM,
     SCREEN_CONFIRM_KILL,
 };
@@ -94,11 +97,16 @@ enum process_sort {
 
 struct app_state {
     enum app_screen screen;
+    enum app_screen return_screen;
     enum process_sort sort;
+    enum teaching_concept lesson;
+    size_t learn_selected;
     size_t selected;
     int selected_pid;
     uint64_t selected_starttime;
     struct process_detail selected_detail;
+    struct overview view;
+    int view_ok;
     char notice[192];
 };
 
@@ -131,7 +139,7 @@ static void restore_terminal(void)
 
 static void print_help(void)
 {
-    puts("RookieTop - beginner-first Linux system monitor");
+    puts("RookieTop - learn Linux by watching your own system work");
     puts("");
     puts("Usage: rookietop [OPTION]");
     puts("");
@@ -141,11 +149,12 @@ static void print_help(void)
     puts("  -V, --version    Show version");
     puts("");
     puts("Interactive keys:");
-    puts("  p                Open process explorer");
-    puts("  Up/Down          Select process");
-    puts("  Enter            Inspect selected process");
-    puts("  k                Ask process to stop with SIGTERM");
-    puts("  K                Force-stop with SIGKILL after confirmation");
+    puts("  ? or l           Learn from the current system");
+    puts("  p                Open Process Explorer");
+    puts("  Up/Down          Select an item or process");
+    puts("  Enter            Open the selected item");
+    puts("  k                Safe Stop a process with SIGTERM");
+    puts("  K                Force Kill with SIGKILL after confirmation");
     puts("  Esc              Go back");
     puts("  q                Quit");
     puts("");
@@ -171,6 +180,44 @@ static double elapsed_seconds(const struct timespec *start, const struct timespe
 {
     return (double)(end->tv_sec - start->tv_sec) +
            (double)(end->tv_nsec - start->tv_nsec) / 1000000000.0;
+}
+
+static struct terminal_size terminal_size(void)
+{
+    struct terminal_size size = {.rows = 24, .cols = 80};
+    struct winsize window;
+
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &window) == 0) {
+        if (window.ws_row > 0) {
+            size.rows = (int)window.ws_row;
+        }
+        if (window.ws_col > 0) {
+            size.cols = (int)window.ws_col;
+        }
+    }
+    return size;
+}
+
+static void move_to(int row, int col)
+{
+    printf("\033[%d;%dH", row, col);
+}
+
+static void print_rule(int width)
+{
+    for (int i = 0; i < width; i++) {
+        putchar('-');
+    }
+}
+
+static void print_section(const char *name)
+{
+    printf("%s%s%s", ansi(ANSI_BOLD), name, ansi(ANSI_RESET));
+}
+
+static void print_key(const char *key, const char *label, const char *color)
+{
+    printf("%s%s[%s]%s %s", ansi(ANSI_BOLD), ansi(color), key, ansi(ANSI_RESET), label);
 }
 
 static const char *cpu_status(double usage)
@@ -206,30 +253,15 @@ static const char *disk_status(double usage)
     return "Normal";
 }
 
-static const char *cpu_color(double usage)
+static const char *metric_color(double usage, double warn, double critical)
 {
-    return usage >= 70.0 ? ANSI_YELLOW : ANSI_GREEN;
-}
-
-static const char *memory_color(double usage)
-{
-    return usage >= 80.0 ? ANSI_YELLOW : ANSI_GREEN;
-}
-
-static const char *disk_color(double usage)
-{
-    if (usage >= 95.0) {
+    if (usage >= critical) {
         return ANSI_RED;
     }
-    return usage >= 85.0 ? ANSI_YELLOW : ANSI_GREEN;
-}
-
-static const char *thermal_color(double temperature)
-{
-    if (temperature >= 95.0) {
-        return ANSI_RED;
+    if (usage >= warn) {
+        return ANSI_YELLOW;
     }
-    return temperature >= 80.0 ? ANSI_YELLOW : ANSI_GREEN;
+    return ANSI_GREEN;
 }
 
 static double load_ratio(const struct overview *view)
@@ -250,15 +282,6 @@ static const char *load_status(const struct overview *view)
         return "Busy";
     }
     return "Light";
-}
-
-static const char *load_color(const struct overview *view)
-{
-    double ratio = load_ratio(view);
-    if (ratio >= 1.5) {
-        return ANSI_RED;
-    }
-    return ratio >= 0.8 ? ANSI_YELLOW : ANSI_GREEN;
 }
 
 static const char *overall_status(const struct overview *view)
@@ -284,39 +307,6 @@ static const char *overall_color(const struct overview *view)
         return ANSI_YELLOW;
     }
     return ANSI_GREEN;
-}
-
-static struct terminal_size terminal_size(void)
-{
-    struct terminal_size size = {.rows = 24, .cols = 80};
-    struct winsize window;
-
-    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &window) == 0) {
-        if (window.ws_row > 0) {
-            size.rows = (int)window.ws_row;
-        }
-        if (window.ws_col > 0) {
-            size.cols = (int)window.ws_col;
-        }
-    }
-    return size;
-}
-
-static void move_to(int row, int col)
-{
-    printf("\033[%d;%dH", row, col);
-}
-
-static void print_rule_width(int width)
-{
-    for (int i = 0; i < width; i++) {
-        putchar('-');
-    }
-}
-
-static void print_section(const char *name)
-{
-    printf("%s%s%s", ansi(ANSI_BOLD), name, ansi(ANSI_RESET));
 }
 
 static void print_bar(double percent, int width, const char *color)
@@ -385,17 +375,17 @@ static void history_push(const struct overview *view)
     history.memory[HISTORY_MAX - 1] = view->memory_percent;
 }
 
-static void print_history_line(const char *label,
-                               const double *values,
-                               size_t count,
-                               int graph_width,
-                               const char *color)
+static void print_history(const char *label,
+                          const double *values,
+                          size_t count,
+                          int width,
+                          const char *color)
 {
     static const char levels[] = " .:-=+*#%@";
-    size_t level_count = sizeof(levels) - 2;
-    size_t shown = count < (size_t)graph_width ? count : (size_t)graph_width;
+    const size_t max_level = sizeof(levels) - 2;
+    size_t shown = count < (size_t)width ? count : (size_t)width;
     size_t start = count - shown;
-    int padding = graph_width - (int)shown;
+    int padding = width - (int)shown;
 
     printf("%-7s ", label);
     fputs(ansi(ANSI_DIM), stdout);
@@ -412,39 +402,10 @@ static void print_history_line(const char *label,
         if (value > 100.0) {
             value = 100.0;
         }
-        size_t level = (size_t)(value * (double)level_count / 100.0);
+        size_t level = (size_t)(value * (double)max_level / 100.0);
         putchar(levels[level]);
     }
     fputs(ansi(ANSI_RESET), stdout);
-}
-
-static void print_insight(const struct overview *view)
-{
-    if (view->disk_percent >= 95.0) {
-        printf("%s!%s Root storage is almost full. Free space soon.", ansi(ANSI_RED), ansi(ANSI_RESET));
-    } else if (view->memory_percent >= 90.0) {
-        printf("%s!%s Available memory is low. Sustained pressure can slow the system.", ansi(ANSI_YELLOW), ansi(ANSI_RESET));
-    } else if (view->cpu_percent >= 90.0) {
-        printf("%s!%s CPU is working very hard right now.", ansi(ANSI_YELLOW), ansi(ANSI_RESET));
-    } else if (load_ratio(view) >= 1.25) {
-        printf("%s!%s One-minute load is high for %ld online CPUs; work may be queueing or waiting on I/O.",
-               ansi(ANSI_YELLOW), ansi(ANSI_RESET), view->host.cores);
-    } else if (view->host_ok && view->host.thermal_ok && view->host.thermal_c >= 90.0) {
-        printf("%s!%s The hottest exposed thermal zone is %.1f C.", ansi(ANSI_YELLOW), ansi(ANSI_RESET), view->host.thermal_c);
-    } else if (view->disk_percent >= 85.0) {
-        printf("%s!%s Root storage is getting full; keep an eye on free space.", ansi(ANSI_YELLOW), ansi(ANSI_RESET));
-    } else {
-        printf("%sOK%s CPU, memory, load, and root storage have comfortable headroom.", ansi(ANSI_GREEN), ansi(ANSI_RESET));
-    }
-}
-
-static void print_load_guide(const struct overview *view)
-{
-    if (!view->host_ok) {
-        return;
-    }
-    printf("%sLoad:%s %.2f over %ld CPUs is %s; load is queue pressure, not CPU percentage.",
-           ansi(ANSI_DIM), ansi(ANSI_RESET), view->host.load1, view->host.cores, load_status(view));
 }
 
 static int collect_overview(struct overview *view)
@@ -462,7 +423,8 @@ static int collect_overview(struct overview *view)
     view->network_ok = 1;
     view->host_ok = host_read(&view->host) == 0;
 
-    if (memory_read(&view->memory) != 0 || disk_read_root(&view->disk) != 0 || cpu_read(&cpu_prev) != 0) {
+    if (memory_read(&view->memory) != 0 || disk_read_root(&view->disk) != 0 ||
+        cpu_read(&cpu_prev) != 0) {
         return -1;
     }
 
@@ -478,14 +440,19 @@ static int collect_overview(struct overview *view)
 
     if (view->network_ok &&
         (network_read(&net_curr) != 0 || clock_gettime(CLOCK_MONOTONIC, &net_end) != 0 ||
-         network_rate(&net_prev, &net_curr, elapsed_seconds(&net_start, &net_end),
-                      &view->rx_per_sec, &view->tx_per_sec) != 0)) {
+         network_rate(&net_prev,
+                      &net_curr,
+                      elapsed_seconds(&net_start, &net_end),
+                      &view->rx_per_sec,
+                      &view->tx_per_sec) != 0)) {
         view->network_ok = 0;
     }
 
     if (cpu_usage(&cpu_prev, &cpu_curr, &view->cpu_percent) != 0 ||
         cpu_total_delta(&cpu_prev, &cpu_curr, &system_delta_ticks) != 0 ||
-        memory_usage(&view->memory, &view->memory_percent, &view->memory_used_kib,
+        memory_usage(&view->memory,
+                     &view->memory_percent,
+                     &view->memory_used_kib,
                      &view->swap_used_kib) != 0 ||
         disk_usage(&view->disk, &view->disk_percent, &view->disk_used_bytes) != 0) {
         process_cpu_snapshot_free(process_prev);
@@ -509,170 +476,63 @@ static int collect_overview(struct overview *view)
     return 0;
 }
 
-static void print_host_compact(const struct overview *view)
+static void print_insight(const struct overview *view)
 {
-    if (!view->host_ok) {
-        return;
-    }
-
-    char uptime[32];
-    format_uptime(view->host.uptime_seconds, uptime, sizeof(uptime));
-    printf("Host     %s | Linux %s | %ld CPU | up %s\n",
-           view->host.hostname, view->host.kernel_release, view->host.cores, uptime);
-    printf("Load     %.2f  %.2f  %.2f  %s%s%s\n",
-           view->host.load1, view->host.load5, view->host.load15,
-           ansi(load_color(view)), load_status(view), ansi(ANSI_RESET));
-    if (view->host.thermal_ok) {
-        printf("Thermal  %.1f C  %s%s%s  (%s)\n",
-               view->host.thermal_c,
-               ansi(thermal_color(view->host.thermal_c)),
-               view->host.thermal_c >= 80.0 ? "Warm" : "Normal",
-               ansi(ANSI_RESET), view->host.thermal_type);
+    if (view->disk_percent >= 95.0) {
+        printf("%s!%s Root storage is almost full. Free space soon.", ansi(ANSI_RED), ansi(ANSI_RESET));
+    } else if (view->memory_percent >= 90.0) {
+        printf("%s!%s Available memory is low. Sustained pressure can slow the system.", ansi(ANSI_YELLOW), ansi(ANSI_RESET));
+    } else if (view->cpu_percent >= 90.0) {
+        printf("%s!%s CPU is working very hard right now.", ansi(ANSI_YELLOW), ansi(ANSI_RESET));
+    } else if (load_ratio(view) >= 1.25) {
+        printf("%s!%s Load is high for this CPU count; work may be queueing or waiting on I/O.", ansi(ANSI_YELLOW), ansi(ANSI_RESET));
+    } else {
+        printf("%sOK%s CPU, memory, load, and root storage have comfortable headroom.", ansi(ANSI_GREEN), ansi(ANSI_RESET));
     }
 }
 
-static void render_compact(const struct overview *view, int live)
+static void render_compact(const struct overview *view)
 {
-    printf("%sRookieTop%s  %s%s%s  %s%s%s\n",
-           ansi(ANSI_BOLD), ansi(ANSI_RESET), ansi(ANSI_DIM), ROOKIETOP_VERSION,
-           ansi(ANSI_RESET), ansi(overall_color(view)), overall_status(view), ansi(ANSI_RESET));
-    print_rule_width(60);
+    printf("RookieTop %s  %s\n", ROOKIETOP_VERSION, overall_status(view));
+    print_rule(64);
     putchar('\n');
-
-    print_host_compact(view);
-    if (view->host_ok) {
-        putchar('\n');
-    }
-
-    print_section("SYSTEM");
+    print_metric("CPU", view->cpu_percent, cpu_status(view->cpu_percent), "", 18);
     putchar('\n');
-    print_metric("CPU", view->cpu_percent, cpu_status(view->cpu_percent), cpu_color(view->cpu_percent), COMPACT_BAR_WIDTH);
+    print_metric("Memory", view->memory_percent, memory_status(view->memory_percent), "", 18);
     putchar('\n');
-    print_metric("Memory", view->memory_percent, memory_status(view->memory_percent), memory_color(view->memory_percent), COMPACT_BAR_WIDTH);
+    print_metric("Disk", view->disk_percent, disk_status(view->disk_percent), "", 18);
     putchar('\n');
-    print_metric("Disk", view->disk_percent, disk_status(view->disk_percent), disk_color(view->disk_percent), COMPACT_BAR_WIDTH);
-    puts("\n");
-
-    printf("RAM      %.1f / %.1f GiB used    %.1f GiB available\n",
+    printf("RAM      %.1f / %.1f GiB used | %.1f GiB available\n",
            (double)view->memory_used_kib / KIB_PER_GIB,
            (double)view->memory.total_kib / KIB_PER_GIB,
            (double)view->memory.available_kib / KIB_PER_GIB);
-    printf("Swap     %.1f / %.1f GiB used\n",
-           (double)view->swap_used_kib / KIB_PER_GIB,
-           (double)view->memory.swap_total_kib / KIB_PER_GIB);
-    printf("Root     %.1f / %.1f GiB used    %.1f GiB available\n",
-           (double)view->disk_used_bytes / BYTES_PER_GIB,
-           (double)view->disk.total_bytes / BYTES_PER_GIB,
-           (double)view->disk.available_bytes / BYTES_PER_GIB);
     if (view->network_ok) {
-        printf("Network  down %.2f MiB/s          up %.2f MiB/s\n",
-               view->rx_per_sec / BYTES_PER_MIB, view->tx_per_sec / BYTES_PER_MIB);
-    } else {
-        puts("Network  unavailable for this sample");
+        printf("Network  down %.2f MiB/s | up %.2f MiB/s\n",
+               view->rx_per_sec / BYTES_PER_MIB,
+               view->tx_per_sec / BYTES_PER_MIB);
     }
-
-    puts("\nINSIGHT");
+    puts("");
     print_insight(view);
-    putchar('\n');
-    if (view->host_ok) {
-        print_load_guide(view);
-        putchar('\n');
-    }
-    printf("\n%sSources: procfs | sysfs | statvfs() | no root | no daemon%s\n", ansi(ANSI_DIM), ansi(ANSI_RESET));
-    if (live) {
-        printf("%sp processes  |  q quit  |  Ctrl+C quit%s\n", ansi(ANSI_DIM), ansi(ANSI_RESET));
-    }
+    puts("\n\nLearn interactively by running RookieTop in a terminal and pressing ?.");
 }
 
-static void render_process_panel_cpu(const struct overview *view, int row, int col, int panel_width, int rows)
+static void render_overview(const struct overview *view, struct terminal_size term)
 {
-    move_to(row, col);
-    printf("%sTOP CPU%s  %s250ms share of whole machine%s",
-           ansi(ANSI_BOLD), ansi(ANSI_RESET), ansi(ANSI_DIM), ansi(ANSI_RESET));
-    move_to(row + 1, col);
-
-    int name_width = panel_width - 20;
-    if (name_width > 32) {
-        name_width = 32;
-    }
-    if (name_width < 12) {
-        name_width = 12;
-    }
-    printf("%-*s %7s %8s", name_width, "NAME", "CPU %", "PID");
-
-    if (!view->cpu_process_ok) {
-        move_to(row + 2, col);
-        printf("%sunavailable%s", ansi(ANSI_DIM), ansi(ANSI_RESET));
-        return;
-    }
-
-    int shown = (int)view->cpu_process_count < rows ? (int)view->cpu_process_count : rows;
-    for (int i = 0; i < shown; i++) {
-        move_to(row + 2 + i, col);
-        printf("%-*.*s %7.2f %8d", name_width, name_width, view->cpu_top[i].name,
-               view->cpu_top[i].cpu_percent, view->cpu_top[i].pid);
-    }
-    if (shown == 0) {
-        move_to(row + 2, col);
-        printf("%sno measurable CPU in this sample%s", ansi(ANSI_DIM), ansi(ANSI_RESET));
-    }
-}
-
-static void render_process_panel_memory(const struct overview *view, int row, int col, int panel_width, int rows)
-{
-    move_to(row, col);
-    printf("%sTOP MEMORY%s  %s%zu readable processes%s",
-           ansi(ANSI_BOLD), ansi(ANSI_RESET), ansi(ANSI_DIM), view->memory_process_total, ansi(ANSI_RESET));
-    move_to(row + 1, col);
-
-    int name_width = panel_width - 20;
-    if (name_width > 32) {
-        name_width = 32;
-    }
-    if (name_width < 12) {
-        name_width = 12;
-    }
-    printf("%-*s %7s %8s", name_width, "NAME", "RSS MiB", "PID");
-
-    if (!view->memory_process_ok) {
-        move_to(row + 2, col);
-        printf("%sunavailable%s", ansi(ANSI_DIM), ansi(ANSI_RESET));
-        return;
-    }
-
-    int shown = (int)view->memory_process_count < rows ? (int)view->memory_process_count : rows;
-    for (int i = 0; i < shown; i++) {
-        move_to(row + 2 + i, col);
-        printf("%-*.*s %7.1f %8d", name_width, name_width, view->memory_top[i].name,
-               (double)view->memory_top[i].rss_kib / KIB_PER_MIB, view->memory_top[i].pid);
-    }
-}
-
-static void render_fullscreen(const struct overview *view, struct terminal_size term)
-{
-    int full_width = term.cols - 2;
-    int left_col = 2;
-    int left_width = term.cols * 3 / 5;
-    int right_col = left_width + 3;
-    int bar_width = left_width - 30;
-    int panel_width = (full_width - 3) / 2;
-    int process_right_col = left_col + panel_width + 3;
-    int process_rows = term.rows - 27;
-    int activity_row;
-    int insight_row = term.rows - 7;
-    int footer_rule_row = term.rows - 3;
-    int graph_width = term.cols - 18;
+    int left = 2;
+    int width = term.cols - 3;
+    int split = term.cols * 3 / 5;
+    int right = split + 2;
+    int bar_width = split - 29;
+    int process_rows = term.rows >= 40 ? 6 : 4;
+    int process_row = 14;
+    int activity_row = process_row + process_rows + 3;
+    int teaching_row = term.rows - 8;
+    int footer_row = term.rows - 2;
+    int graph_width = width - 12;
     const char *health = overall_status(view);
-    int health_col = term.cols - (int)strlen(health) - 1;
 
-    if (bar_width < 12) {
-        bar_width = 12;
-    }
-    if (process_rows < 3) {
-        process_rows = 3;
-    }
-    if (process_rows > TOP_PROCESS_COUNT) {
-        process_rows = TOP_PROCESS_COUNT;
+    if (bar_width < 14) {
+        bar_width = 14;
     }
     if (graph_width > HISTORY_MAX) {
         graph_width = HISTORY_MAX;
@@ -680,19 +540,17 @@ static void render_fullscreen(const struct overview *view, struct terminal_size 
     if (graph_width < 20) {
         graph_width = 20;
     }
-    activity_row = 16 + process_rows;
 
     fputs("\033[H\033[J", stdout);
-    move_to(1, left_col);
-    printf("%sRookieTop%s  %s%s%s", ansi(ANSI_BOLD), ansi(ANSI_RESET), ansi(ANSI_DIM), ROOKIETOP_VERSION, ansi(ANSI_RESET));
-    if (health_col > 30) {
-        move_to(1, health_col);
-    } else {
-        putchar(' ');
-    }
+    move_to(1, left);
+    printf("%sRookieTop%s  %s%s%s  %sLEARN LINUX FROM THIS MACHINE%s",
+           ansi(ANSI_BOLD), ansi(ANSI_RESET),
+           ansi(ANSI_DIM), ROOKIETOP_VERSION, ansi(ANSI_RESET),
+           ansi(ANSI_CYAN), ansi(ANSI_RESET));
+    move_to(1, term.cols - (int)strlen(health) - 1);
     printf("%s%s%s", ansi(overall_color(view)), health, ansi(ANSI_RESET));
 
-    move_to(2, left_col);
+    move_to(2, left);
     if (view->host_ok) {
         char uptime[32];
         format_uptime(view->host.uptime_seconds, uptime, sizeof(uptime));
@@ -700,109 +558,108 @@ static void render_fullscreen(const struct overview *view, struct terminal_size 
                ansi(ANSI_DIM), view->host.hostname, view->host.kernel_release, view->host.cores,
                uptime, view->host.load1, view->host.load5, view->host.load15, ansi(ANSI_RESET));
     }
+    move_to(3, left);
+    print_rule(width);
 
-    move_to(3, left_col);
-    print_rule_width(full_width);
-    move_to(5, left_col);
-    print_section("SYSTEM");
-    move_to(6, left_col);
-    print_metric("CPU", view->cpu_percent, cpu_status(view->cpu_percent), cpu_color(view->cpu_percent), bar_width);
-    move_to(7, left_col);
-    print_metric("Memory", view->memory_percent, memory_status(view->memory_percent), memory_color(view->memory_percent), bar_width);
-    move_to(8, left_col);
-    print_metric("Disk", view->disk_percent, disk_status(view->disk_percent), disk_color(view->disk_percent), bar_width);
+    move_to(5, left);
+    print_section("OBSERVE");
+    move_to(6, left);
+    print_metric("CPU", view->cpu_percent, cpu_status(view->cpu_percent),
+                 metric_color(view->cpu_percent, 70.0, 95.0), bar_width);
+    move_to(7, left);
+    print_metric("Memory", view->memory_percent, memory_status(view->memory_percent),
+                 metric_color(view->memory_percent, 80.0, 95.0), bar_width);
+    move_to(8, left);
+    print_metric("Disk", view->disk_percent, disk_status(view->disk_percent),
+                 metric_color(view->disk_percent, 85.0, 95.0), bar_width);
 
-    move_to(5, right_col);
-    print_section("DETAILS");
-    move_to(6, right_col);
-    printf("RAM      %.1f / %.1f GiB   %.1f GiB avail",
+    move_to(5, right);
+    print_section("CONTEXT");
+    move_to(6, right);
+    printf("RAM      %.1f / %.1f GiB   %.1f GiB available",
            (double)view->memory_used_kib / KIB_PER_GIB,
            (double)view->memory.total_kib / KIB_PER_GIB,
            (double)view->memory.available_kib / KIB_PER_GIB);
-    move_to(7, right_col);
-    printf("Swap     %.1f / %.1f GiB used", (double)view->swap_used_kib / KIB_PER_GIB,
-           (double)view->memory.swap_total_kib / KIB_PER_GIB);
-    move_to(8, right_col);
-    printf("Root     %.1f / %.1f GiB   %.1f GiB avail",
+    move_to(7, right);
+    printf("Root     %.1f / %.1f GiB   %.1f GiB available",
            (double)view->disk_used_bytes / BYTES_PER_GIB,
            (double)view->disk.total_bytes / BYTES_PER_GIB,
            (double)view->disk.available_bytes / BYTES_PER_GIB);
-    move_to(9, right_col);
+    move_to(8, right);
     if (view->network_ok) {
-        printf("Network  down %.2f MiB/s   up %.2f MiB/s", view->rx_per_sec / BYTES_PER_MIB,
+        printf("Network  down %.2f MiB/s   up %.2f MiB/s",
+               view->rx_per_sec / BYTES_PER_MIB,
                view->tx_per_sec / BYTES_PER_MIB);
     } else {
-        printf("Network  unavailable");
+        printf("Network  unavailable this sample");
     }
-    move_to(10, right_col);
+    move_to(9, right);
     if (view->host_ok) {
-        printf("Load     %.2f / %ld CPU   %s%s%s", view->host.load1, view->host.cores,
-               ansi(load_color(view)), load_status(view), ansi(ANSI_RESET));
-    } else {
-        printf("Load     unavailable");
+        printf("Load     %.2f / %ld CPU   %s", view->host.load1, view->host.cores, load_status(view));
     }
-    move_to(11, right_col);
+    move_to(10, right);
     if (view->host_ok && view->host.thermal_ok) {
-        printf("Thermal  %s%.1f C%s   %s", ansi(thermal_color(view->host.thermal_c)),
-               view->host.thermal_c, ansi(ANSI_RESET), view->host.thermal_type);
+        printf("Thermal  %.1f C   %s", view->host.thermal_c, view->host.thermal_type);
     } else {
-        printf("%sThermal  n/a (sensor not exposed)%s", ansi(ANSI_DIM), ansi(ANSI_RESET));
+        printf("%sThermal  n/a (not exposed by this system)%s", ansi(ANSI_DIM), ansi(ANSI_RESET));
     }
 
-    move_to(12, left_col);
-    print_rule_width(full_width);
-    render_process_panel_cpu(view, 14, left_col, panel_width, process_rows);
-    render_process_panel_memory(view, 14, process_right_col, panel_width, process_rows);
+    move_to(12, left);
+    print_rule(width);
+    move_to(process_row, left);
+    printf("%sTOP CPU%s", ansi(ANSI_BOLD), ansi(ANSI_RESET));
+    move_to(process_row, right);
+    printf("%sTOP MEMORY%s", ansi(ANSI_BOLD), ansi(ANSI_RESET));
 
-    move_to(activity_row, left_col);
-    print_section("ACTIVITY");
-    printf("  %slast ~%zu seconds%s", ansi(ANSI_DIM), history.count, ansi(ANSI_RESET));
-    move_to(activity_row + 1, left_col);
-    print_history_line("CPU", history.cpu, history.count, graph_width, cpu_color(view->cpu_percent));
-    move_to(activity_row + 2, left_col);
-    print_history_line("Memory", history.memory, history.count, graph_width, memory_color(view->memory_percent));
+    for (int i = 0; i < process_rows; i++) {
+        move_to(process_row + 1 + i, left);
+        if (view->cpu_process_ok && (size_t)i < view->cpu_process_count) {
+            printf("%-22.22s %6.2f%%  pid %-7d",
+                   view->cpu_top[i].name, view->cpu_top[i].cpu_percent, view->cpu_top[i].pid);
+        } else if (i == 0) {
+            printf("%sno measurable CPU in this short sample%s", ansi(ANSI_DIM), ansi(ANSI_RESET));
+        }
 
-    move_to(insight_row, left_col);
-    print_section("INSIGHT");
-    move_to(insight_row + 1, left_col);
+        move_to(process_row + 1 + i, right);
+        if (view->memory_process_ok && (size_t)i < view->memory_process_count) {
+            printf("%-22.22s %7.1f MiB  pid %-7d",
+                   view->memory_top[i].name,
+                   (double)view->memory_top[i].rss_kib / KIB_PER_MIB,
+                   view->memory_top[i].pid);
+        }
+    }
+
+    if (activity_row + 2 < teaching_row) {
+        move_to(activity_row, left);
+        print_section("ACTIVITY");
+        printf("  %slast ~%zu samples%s", ansi(ANSI_DIM), history.count, ansi(ANSI_RESET));
+        move_to(activity_row + 1, left);
+        print_history("CPU", history.cpu, history.count, graph_width,
+                      metric_color(view->cpu_percent, 70.0, 95.0));
+        move_to(activity_row + 2, left);
+        print_history("Memory", history.memory, history.count, graph_width,
+                      metric_color(view->memory_percent, 80.0, 95.0));
+    }
+
+    move_to(teaching_row, left);
+    printf("%sUNDERSTAND%s", ansi(ANSI_CYAN), ansi(ANSI_RESET));
+    move_to(teaching_row + 1, left);
     print_insight(view);
-    if (view->host_ok) {
-        move_to(insight_row + 2, left_col);
-        print_load_guide(view);
-    }
+    move_to(teaching_row + 2, left);
+    printf("%sCurious?%s CPU %% is calculated, used RAM is not the same as pressure, and load is not CPU %%.",
+           ansi(ANSI_CYAN), ansi(ANSI_RESET));
+    move_to(teaching_row + 3, left);
+    printf("Press %s?%s and RookieTop will explain WHAT, WHY, HOW Linux knows, and something you can TRY.",
+           ansi(ANSI_BOLD), ansi(ANSI_RESET));
 
-    move_to(footer_rule_row, left_col);
-    print_rule_width(full_width);
-    move_to(term.rows - 2, left_col);
-    printf("%sSources: procfs | sysfs | statvfs()   p = process explorer%s", ansi(ANSI_DIM), ansi(ANSI_RESET));
-    move_to(term.rows - 1, left_col);
-    printf("%sp processes   q quit   LIVE ~1s   no root | no daemon%s", ansi(ANSI_DIM), ansi(ANSI_RESET));
-}
-
-static int show_overview(int live)
-{
-    struct overview view;
-    if (collect_overview(&view) != 0) {
-        fputs("rookietop: could not read system data\n", stderr);
-        return 1;
-    }
-    history_push(&view);
-
-    if (!live) {
-        render_compact(&view, 0);
-        return 0;
-    }
-
-    struct terminal_size term = terminal_size();
-    if (term.cols < MIN_FULL_COLS || term.rows < MIN_FULL_ROWS) {
-        fputs("\033[H\033[J", stdout);
-        render_compact(&view, 1);
-        printf("%sResize to at least %dx%d for full dashboard.%s\n",
-               ansi(ANSI_DIM), MIN_FULL_COLS, MIN_FULL_ROWS, ansi(ANSI_RESET));
-    } else {
-        render_fullscreen(&view, term);
-    }
-    return 0;
+    move_to(footer_row, left);
+    print_rule(width);
+    move_to(footer_row + 1, left);
+    print_key("?", "Learn", ANSI_CYAN);
+    printf("   ");
+    print_key("p", "Processes", ANSI_GREEN);
+    printf("   ");
+    print_key("q", "Quit", ANSI_DIM);
 }
 
 static int compare_memory(const void *a, const void *b)
@@ -883,39 +740,21 @@ static void align_selection(struct app_state *state, const struct process_row *r
     state->selected_starttime = rows[state->selected].starttime;
 }
 
-static const char *state_meaning(char state)
-{
-    if (state == 'R') {
-        return "running";
-    }
-    if (state == 'S') {
-        return "sleeping";
-    }
-    if (state == 'D') {
-        return "waiting on I/O";
-    }
-    if (state == 'T' || state == 't') {
-        return "stopped";
-    }
-    if (state == 'Z') {
-        return "zombie";
-    }
-    return "other";
-}
-
 static void render_processes(const struct process_row *rows,
                              size_t count,
                              const struct app_state *state,
                              struct terminal_size term)
 {
     int left = 2;
-    int width = term.cols - 2;
-    int table_row = 5;
+    int width = term.cols - 3;
+    int table_row = 7;
+    int learn_row = term.rows - 9;
     int footer_row = term.rows - 2;
-    int visible = footer_row - table_row - 2;
+    int visible = learn_row - table_row - 1;
     int name_width = term.cols - 43;
-    if (visible < 3) {
-        visible = 3;
+
+    if (visible < 4) {
+        visible = 4;
     }
     if (name_width < 12) {
         name_width = 12;
@@ -931,35 +770,40 @@ static void render_processes(const struct process_row *rows,
 
     fputs("\033[H\033[J", stdout);
     move_to(1, left);
-    printf("%sRookieTop%s  %s%s%s  PROCESS EXPLORER",
-           ansi(ANSI_BOLD), ansi(ANSI_RESET), ansi(ANSI_DIM), ROOKIETOP_VERSION, ansi(ANSI_RESET));
+    printf("%sRookieTop%s  %sPROCESS EXPLORER%s",
+           ansi(ANSI_BOLD), ansi(ANSI_RESET), ansi(ANSI_CYAN), ansi(ANSI_RESET));
     move_to(2, left);
-    printf("%s%zu readable processes | sorted by %s | signals are never escalated automatically%s",
-           ansi(ANSI_DIM), count, sort_name(state->sort), ansi(ANSI_RESET));
+    printf("%sDo not memorize columns. Select a process and RookieTop will explain what they mean.%s",
+           ansi(ANSI_CYAN), ansi(ANSI_RESET));
     move_to(3, left);
-    print_rule_width(width);
-    move_to(table_row, left);
-    printf("  %-8s %9s %5s %7s %-*s", "PID", "RSS MiB", "STATE", "THREADS", name_width, "NAME");
+    printf("%s%zu readable processes | sorted by %s | MEM = resident RAM currently held by the process%s",
+           ansi(ANSI_DIM), count, sort_name(state->sort), ansi(ANSI_RESET));
+    move_to(4, left);
+    print_rule(width);
 
-    int row = table_row + 1;
-    for (size_t i = start; i < count && row < footer_row - 1; i++, row++) {
+    move_to(table_row - 1, left);
+    printf("  %-8s %9s %13s %7s %-*s", "PID", "MEM MiB", "STATUS", "THREADS", name_width, "NAME");
+
+    int row = table_row;
+    for (size_t i = start; i < count && row < learn_row - 1; i++, row++) {
         move_to(row, left);
+        const char *state_name = teaching_state_name(rows[i].state);
         if (i == state->selected) {
             fputs(ansi(ANSI_REVERSE), stdout);
-            printf("> %-8d %9.1f %5c %7lu %-*.*s",
+            printf("> %-8d %9.1f %13.13s %7lu %-*.*s",
                    rows[i].pid,
                    (double)rows[i].rss_kib / KIB_PER_MIB,
-                   rows[i].state,
+                   state_name,
                    rows[i].threads,
                    name_width,
                    name_width,
                    rows[i].name);
             fputs(ansi(ANSI_RESET), stdout);
         } else {
-            printf("  %-8d %9.1f %5c %7lu %-*.*s",
+            printf("  %-8d %9.1f %13.13s %7lu %-*.*s",
                    rows[i].pid,
                    (double)rows[i].rss_kib / KIB_PER_MIB,
-                   rows[i].state,
+                   state_name,
                    rows[i].threads,
                    name_width,
                    name_width,
@@ -967,89 +811,376 @@ static void render_processes(const struct process_row *rows,
         }
     }
 
-    if (count == 0) {
-        move_to(table_row + 2, left);
-        printf("%sNo readable processes.%s", ansi(ANSI_DIM), ansi(ANSI_RESET));
+    move_to(learn_row, left);
+    print_rule(width);
+    move_to(learn_row + 1, left);
+    printf("%sLEARN SELECTED%s", ansi(ANSI_CYAN), ansi(ANSI_RESET));
+    if (count > 0) {
+        const struct process_row *selected = &rows[state->selected];
+        move_to(learn_row + 2, left);
+        printf("%s  PID %d  |  %s  |  %.1f MiB RAM  |  %lu thread%s",
+               selected->name,
+               selected->pid,
+               teaching_state_name(selected->state),
+               (double)selected->rss_kib / KIB_PER_MIB,
+               selected->threads,
+               selected->threads == 1 ? "" : "s");
+        move_to(learn_row + 3, left);
+        printf("%s", teaching_state_explanation(selected->state));
+        move_to(learn_row + 4, left);
+        printf("PID identifies this running instance. MEM is RSS. Press ? to learn how /proc exposes it.");
     }
 
     if (state->notice[0] != '\0') {
-        move_to(footer_row - 1, left);
+        move_to(learn_row + 5, left);
         printf("%s%s%s", ansi(ANSI_YELLOW), state->notice, ansi(ANSI_RESET));
     }
+
     move_to(footer_row, left);
-    print_rule_width(width);
+    print_rule(width);
     move_to(footer_row + 1, left);
-    printf("%sUp/Down select | Enter inspect | m memory | p PID | n name | k stop | K force | Esc overview | q quit%s",
-           ansi(ANSI_DIM), ansi(ANSI_RESET));
+    print_key("Up/Down", "Select", ANSI_CYAN);
+    printf("  ");
+    print_key("?", "Explain", ANSI_CYAN);
+    printf("  ");
+    print_key("Enter", "Inspect", ANSI_GREEN);
+    printf("  ");
+    print_key("k", "Safe Stop", ANSI_GREEN);
+    printf("  ");
+    print_key("K", "Force Kill", ANSI_RED);
+    printf("  %s[m] MEM  [p] PID  [n] Name  [Esc] Back  [q] Quit%s", ansi(ANSI_DIM), ansi(ANSI_RESET));
 }
 
-static void render_detail(const struct process_detail *detail, struct terminal_size term)
+static void render_process_detail(const struct process_detail *detail, struct terminal_size term)
 {
     int left = 3;
     int width = term.cols - 5;
+    int footer = term.rows - 2;
+
     fputs("\033[H\033[J", stdout);
     move_to(1, left);
-    printf("%sPROCESS DETAIL%s", ansi(ANSI_BOLD), ansi(ANSI_RESET));
+    printf("%sPROCESS INSPECTOR%s  %s%s%s",
+           ansi(ANSI_BOLD), ansi(ANSI_RESET), ansi(ANSI_CYAN), detail->row.name, ansi(ANSI_RESET));
     move_to(2, left);
-    print_rule_width(width);
-    move_to(4, left);
-    printf("Name       %s", detail->row.name);
+    printf("%sThis is one live Linux process. The labels below map directly to kernel-exposed process data.%s",
+           ansi(ANSI_CYAN), ansi(ANSI_RESET));
+    move_to(3, left);
+    print_rule(width);
+
     move_to(5, left);
-    printf("PID        %d", detail->row.pid);
+    printf("PID        %-10d  %sLinux's numeric handle for this process instance%s",
+           detail->row.pid, ansi(ANSI_DIM), ansi(ANSI_RESET));
     move_to(6, left);
-    printf("State      %c  (%s)", detail->row.state, state_meaning(detail->row.state));
+    printf("Status     %-10s  %s", teaching_state_name(detail->row.state),
+           teaching_state_explanation(detail->row.state));
     move_to(7, left);
-    printf("Threads    %lu", detail->row.threads);
+    printf("Memory     %-10.1f MiB  %sRSS: physical RAM pages currently resident%s",
+           (double)detail->row.rss_kib / KIB_PER_MIB, ansi(ANSI_DIM), ansi(ANSI_RESET));
     move_to(8, left);
-    printf("Memory     %.1f MiB RSS", (double)detail->row.rss_kib / KIB_PER_MIB);
+    printf("Threads    %-10lu  %sExecution flows inside this process%s",
+           detail->row.threads, ansi(ANSI_DIM), ansi(ANSI_RESET));
+
     move_to(10, left);
     print_section("COMMAND");
     move_to(11, left);
     printf("%.*s", width, detail->command);
+
     move_to(13, left);
-    printf("%sRookieTop tracks the process start time before signalling it, so PID reuse cannot target a different process.%s",
-           ansi(ANSI_DIM), ansi(ANSI_RESET));
-    move_to(term.rows - 2, left);
-    print_rule_width(width);
-    move_to(term.rows - 1, left);
-    printf("%sk graceful stop | K force stop | Esc back | q quit%s", ansi(ANSI_DIM), ansi(ANSI_RESET));
+    printf("%sHOW LINUX EXPOSES THIS%s", ansi(ANSI_CYAN), ansi(ANSI_RESET));
+    move_to(14, left);
+    printf("/proc/%d/status   -> memory, threads, readable state", detail->row.pid);
+    move_to(15, left);
+    printf("/proc/%d/stat     -> CPU accounting, state, process start time", detail->row.pid);
+    move_to(16, left);
+    printf("/proc/%d/cmdline  -> command arguments", detail->row.pid);
+
+    move_to(18, left);
+    printf("%sWHY START TIME MATTERS%s", ansi(ANSI_CYAN), ansi(ANSI_RESET));
+    move_to(19, left);
+    printf("Linux can reuse a PID after a process exits. RookieTop verifies PID + start time before sending a signal.");
+
+    move_to(footer, left);
+    print_rule(width);
+    move_to(footer + 1, left);
+    print_key("?", "Learn this process", ANSI_CYAN);
+    printf("   ");
+    print_key("k", "Safe Stop", ANSI_GREEN);
+    printf("   ");
+    print_key("K", "Force Kill", ANSI_RED);
+    printf("   %s[Esc] Back  [q] Quit%s", ansi(ANSI_DIM), ansi(ANSI_RESET));
+}
+
+static void render_process_learning(const struct process_detail *detail, struct terminal_size term)
+{
+    int left = 4;
+    int width = term.cols - 7;
+    int footer = term.rows - 2;
+
+    fputs("\033[H\033[J", stdout);
+    move_to(1, left);
+    printf("%sLEARN FROM THIS PROCESS%s  %s%s%s",
+           ansi(ANSI_CYAN), ansi(ANSI_RESET), ansi(ANSI_BOLD), detail->row.name, ansi(ANSI_RESET));
+    move_to(2, left);
+    printf("Your running system is the example: PID %d | %s | %.1f MiB | %lu thread%s",
+           detail->row.pid,
+           teaching_state_name(detail->row.state),
+           (double)detail->row.rss_kib / KIB_PER_MIB,
+           detail->row.threads,
+           detail->row.threads == 1 ? "" : "s");
+    move_to(3, left);
+    print_rule(width);
+
+    move_to(5, left);
+    printf("%sWHAT%s", ansi(ANSI_CYAN), ansi(ANSI_RESET));
+    move_to(6, left);
+    printf("A process is one running instance of a program. Linux gives it a PID and tracks its resources separately.");
+    move_to(8, left);
+    printf("PID %d is not a permanent identity: Linux may reuse that number after this process exits.", detail->row.pid);
+
+    move_to(10, left);
+    printf("%sWHY IS IT '%s'?%s", ansi(ANSI_CYAN), teaching_state_name(detail->row.state), ansi(ANSI_RESET));
+    move_to(11, left);
+    printf("%s", teaching_state_explanation(detail->row.state));
+
+    move_to(13, left);
+    printf("%sHOW DOES ROOKIETOP KNOW?%s", ansi(ANSI_CYAN), ansi(ANSI_RESET));
+    move_to(14, left);
+    printf("RookieTop reads /proc/%d/status, /proc/%d/stat, and /proc/%d/cmdline directly.",
+           detail->row.pid, detail->row.pid, detail->row.pid);
+    move_to(15, left);
+    printf("No `ps` subprocess and no metrics framework sits between RookieTop and Linux procfs.");
+
+    move_to(17, left);
+    printf("%sTRY IT YOURSELF%s", ansi(ANSI_CYAN), ansi(ANSI_RESET));
+    move_to(18, left);
+    printf("In another shell:  cat /proc/%d/status", detail->row.pid);
+    move_to(19, left);
+    printf("Find State, Threads, and VmRSS, then compare them with this screen.");
+
+    move_to(21, left);
+    printf("%sACT SAFELY%s", ansi(ANSI_CYAN), ansi(ANSI_RESET));
+    move_to(22, left);
+    printf("Safe Stop sends SIGTERM so software can clean up. Force Kill sends SIGKILL and skips cleanup.");
+
+    move_to(footer, left);
+    print_rule(width);
+    move_to(footer + 1, left);
+    print_key("k", "Safe Stop", ANSI_GREEN);
+    printf("   ");
+    print_key("K", "Force Kill", ANSI_RED);
+    printf("   %s[Esc] Back  [q] Quit%s", ansi(ANSI_DIM), ansi(ANSI_RESET));
+}
+
+static void print_live_context(const struct overview *view, enum teaching_concept concept)
+{
+    if (concept == TEACH_CPU) {
+        printf("Your CPU right now: %.1f%% (%s)", view->cpu_percent, cpu_status(view->cpu_percent));
+    } else if (concept == TEACH_MEMORY) {
+        printf("Your memory right now: %.1f%% used | %.1f GiB available",
+               view->memory_percent, (double)view->memory.available_kib / KIB_PER_GIB);
+    } else if (concept == TEACH_LOAD && view->host_ok) {
+        printf("Your load right now: %.2f on %ld CPUs (%s)",
+               view->host.load1, view->host.cores, load_status(view));
+    } else if (concept == TEACH_DISK) {
+        printf("Your root filesystem: %.1f%% used | %.1f GiB available",
+               view->disk_percent, (double)view->disk.available_bytes / BYTES_PER_GIB);
+    } else if (concept == TEACH_NETWORK && view->network_ok) {
+        printf("Your traffic now: down %.2f MiB/s | up %.2f MiB/s",
+               view->rx_per_sec / BYTES_PER_MIB, view->tx_per_sec / BYTES_PER_MIB);
+    } else {
+        printf("This lesson maps the concept back to Linux interfaces on your running machine.");
+    }
+}
+
+static void render_learn_menu(const struct app_state *state, struct terminal_size term)
+{
+    int left = 4;
+    int width = term.cols - 7;
+    int footer = term.rows - 2;
+
+    fputs("\033[H\033[J", stdout);
+    move_to(1, left);
+    printf("%sLEARN LINUX WITH YOUR SYSTEM%s", ansi(ANSI_CYAN), ansi(ANSI_RESET));
+    move_to(2, left);
+    printf("Your Linux system is the textbook. Pick a concept; RookieTop connects it to live data and kernel interfaces.");
+    move_to(3, left);
+    print_rule(width);
+
+    if (state->view_ok) {
+        move_to(5, left);
+        printf("%sLIVE NOW%s  CPU %.1f%%  |  Memory %.1f%%  |  Disk %.1f%%",
+               ansi(ANSI_BOLD), ansi(ANSI_RESET),
+               state->view.cpu_percent, state->view.memory_percent, state->view.disk_percent);
+        if (state->view.host_ok) {
+            printf("  |  Load %.2f / %ld CPUs", state->view.host.load1, state->view.host.cores);
+        }
+    }
+
+    int row = 8;
+    for (size_t i = 0; i < teaching_count(); i++, row += 2) {
+        const struct teaching_topic *topic = teaching_get((enum teaching_concept)i);
+        if (topic == NULL) {
+            continue;
+        }
+        move_to(row, left);
+        if (i == state->learn_selected) {
+            printf("%s> %-22s%s  %s", ansi(ANSI_REVERSE), topic->title, ansi(ANSI_RESET), topic->summary);
+        } else {
+            printf("  %-22s  %s%s%s", topic->title, ansi(ANSI_DIM), topic->summary, ansi(ANSI_RESET));
+        }
+    }
+
+    move_to(footer, left);
+    print_rule(width);
+    move_to(footer + 1, left);
+    print_key("Up/Down", "Choose lesson", ANSI_CYAN);
+    printf("   ");
+    print_key("Enter", "Open", ANSI_GREEN);
+    printf("   %s[Esc] Back  [q] Quit%s", ansi(ANSI_DIM), ansi(ANSI_RESET));
+}
+
+static int print_wrapped(int row, int col, int width, const char *text)
+{
+    int current_row = row;
+    const char *cursor = text;
+
+    while (*cursor != '\0') {
+        while (*cursor == ' ') {
+            cursor++;
+        }
+        if (*cursor == '\0') {
+            break;
+        }
+
+        size_t remaining = strlen(cursor);
+        size_t take = remaining < (size_t)width ? remaining : (size_t)width;
+        if (remaining > (size_t)width) {
+            size_t split = take;
+            while (split > 0 && cursor[split] != ' ') {
+                split--;
+            }
+            if (split > 0) {
+                take = split;
+            }
+        }
+
+        move_to(current_row++, col);
+        printf("%.*s", (int)take, cursor);
+        cursor += take;
+        while (*cursor == ' ') {
+            cursor++;
+        }
+    }
+    return current_row;
+}
+
+static void render_lesson(const struct app_state *state, struct terminal_size term)
+{
+    const struct teaching_topic *topic = teaching_get(state->lesson);
+    int left = 4;
+    int width = term.cols - 9;
+    int footer = term.rows - 2;
+    int row = 1;
+
+    if (topic == NULL) {
+        return;
+    }
+    if (width > 110) {
+        width = 110;
+    }
+    if (width < 48) {
+        width = 48;
+    }
+
+    fputs("\033[H\033[J", stdout);
+    move_to(row++, left);
+    printf("%sLEARN%s  %s%s%s", ansi(ANSI_CYAN), ansi(ANSI_RESET), ansi(ANSI_BOLD), topic->title, ansi(ANSI_RESET));
+    move_to(row++, left);
+    printf("%s%s%s", ansi(ANSI_DIM), topic->summary, ansi(ANSI_RESET));
+    move_to(row++, left);
+    print_rule(term.cols - 7);
+
+    if (state->view_ok) {
+        row++;
+        move_to(row++, left);
+        printf("%sYOUR MACHINE RIGHT NOW%s", ansi(ANSI_CYAN), ansi(ANSI_RESET));
+        move_to(row++, left);
+        print_live_context(&state->view, state->lesson);
+    }
+
+    row++;
+    move_to(row++, left);
+    printf("%sWHAT%s", ansi(ANSI_CYAN), ansi(ANSI_RESET));
+    row = print_wrapped(row, left, width, topic->what);
+
+    row++;
+    move_to(row++, left);
+    printf("%sWHY IT MATTERS%s", ansi(ANSI_CYAN), ansi(ANSI_RESET));
+    row = print_wrapped(row, left, width, topic->why);
+
+    row++;
+    move_to(row++, left);
+    printf("%sHOW LINUX / ROOKIETOP KNOWS%s", ansi(ANSI_CYAN), ansi(ANSI_RESET));
+    row = print_wrapped(row, left, width, topic->how);
+    move_to(row++, left);
+    printf("%sSource: %s%s", ansi(ANSI_DIM), topic->source, ansi(ANSI_RESET));
+
+    row++;
+    move_to(row++, left);
+    printf("%sTRY IT YOURSELF%s", ansi(ANSI_CYAN), ansi(ANSI_RESET));
+    (void)print_wrapped(row, left, width, topic->try_it);
+
+    move_to(footer, left);
+    print_rule(term.cols - 7);
+    move_to(footer + 1, left);
+    print_key("n", "Next lesson", ANSI_CYAN);
+    printf("   ");
+    print_key("b", "Previous", ANSI_CYAN);
+    printf("   %s[Esc] Lesson list  [q] Quit%s", ansi(ANSI_DIM), ansi(ANSI_RESET));
 }
 
 static void render_confirm(const struct process_detail *detail,
                            struct terminal_size term,
                            int force)
 {
-    int left = 3;
-    int width = term.cols - 5;
+    int left = 4;
+    int width = term.cols - 7;
+    int footer = term.rows - 2;
+
     fputs("\033[H\033[J", stdout);
     move_to(1, left);
     if (force) {
-        printf("%sFORCE STOP PROCESS?%s", ansi(ANSI_RED), ansi(ANSI_RESET));
+        printf("%sFORCE KILL?%s  %s (PID %d)", ansi(ANSI_RED), ansi(ANSI_RESET), detail->row.name, detail->row.pid);
     } else {
-        printf("%sSTOP PROCESS?%s", ansi(ANSI_YELLOW), ansi(ANSI_RESET));
+        printf("%sSAFE STOP?%s  %s (PID %d)", ansi(ANSI_GREEN), ansi(ANSI_RESET), detail->row.name, detail->row.pid);
     }
     move_to(2, left);
-    print_rule_width(width);
-    move_to(4, left);
-    printf("%s  PID %d", detail->row.name, detail->row.pid);
+    print_rule(width);
+
+    move_to(5, left);
+    printf("%sWHAT WILL HAPPEN%s", ansi(ANSI_CYAN), ansi(ANSI_RESET));
     move_to(6, left);
     if (force) {
-        puts("SIGKILL asks the kernel to stop this process immediately.");
-        move_to(7, left);
-        puts("The process cannot catch SIGKILL or run cleanup handlers.");
-        move_to(9, left);
-        printf("%sUse this only when a graceful SIGTERM did not work.%s", ansi(ANSI_RED), ansi(ANSI_RESET));
+        printf("SIGKILL tells the kernel to terminate this process immediately. The process cannot catch it or clean up.");
+        move_to(8, left);
+        printf("%sUse this only when SIGTERM did not work. Unsaved state or in-flight work can be lost.%s",
+               ansi(ANSI_RED), ansi(ANSI_RESET));
     } else {
-        puts("SIGTERM asks the process to shut down cleanly.");
-        move_to(7, left);
-        puts("The process may save state, close files, and exit on its own.");
-        move_to(9, left);
-        printf("%sRookieTop will not escalate to SIGKILL automatically.%s", ansi(ANSI_DIM), ansi(ANSI_RESET));
+        printf("SIGTERM asks the process to shut down cleanly. Software can close files, flush data, and run cleanup handlers.");
+        move_to(8, left);
+        printf("%sRookieTop never escalates this to SIGKILL automatically.%s", ansi(ANSI_DIM), ansi(ANSI_RESET));
     }
-    move_to(term.rows - 2, left);
-    print_rule_width(width);
-    move_to(term.rows - 1, left);
-    printf("%sy confirm | n/Esc cancel | q quit%s", ansi(ANSI_DIM), ansi(ANSI_RESET));
+
+    move_to(11, left);
+    printf("%sHOW IT IS SENT%s", ansi(ANSI_CYAN), ansi(ANSI_RESET));
+    move_to(12, left);
+    printf("RookieTop calls kill(2) directly after verifying PID + process start time to guard against PID reuse.");
+
+    move_to(footer, left);
+    print_rule(width);
+    move_to(footer + 1, left);
+    print_key("y", "Confirm", force ? ANSI_RED : ANSI_GREEN);
+    printf("   %s[n/Esc] Cancel  [q] Quit%s", ansi(ANSI_DIM), ansi(ANSI_RESET));
 }
 
 static void set_notice(struct app_state *state, const char *message)
@@ -1063,17 +1194,15 @@ static void set_signal_notice(struct app_state *state,
                               const char *name)
 {
     if (result == PROCESS_SIGNAL_OK) {
-        if (force) {
-            (void)snprintf(state->notice, sizeof(state->notice),
-                           "SIGKILL sent to %s. The kernel will stop it immediately.", name);
-        } else {
-            (void)snprintf(state->notice, sizeof(state->notice),
-                           "SIGTERM sent to %s. If it refuses to exit, select it and press K to force.", name);
-        }
+        (void)snprintf(state->notice,
+                       sizeof(state->notice),
+                       force ? "SIGKILL sent to %s. The kernel will terminate it immediately."
+                             : "SIGTERM sent to %s. The process was asked to shut down cleanly.",
+                       name);
     } else if (result == PROCESS_SIGNAL_PERMISSION) {
-        set_notice(state, "Permission denied. The process may belong to another user or be protected by system policy.");
+        set_notice(state, "Permission denied. This process may belong to another user or be protected by system policy.");
     } else if (result == PROCESS_SIGNAL_REUSED) {
-        set_notice(state, "PID was reused by another process. No signal was sent.");
+        set_notice(state, "PID was reused by another process. RookieTop refused to send the signal.");
     } else if (result == PROCESS_SIGNAL_GONE) {
         set_notice(state, "The process already exited. No signal was sent.");
     } else {
@@ -1081,28 +1210,36 @@ static void set_signal_notice(struct app_state *state,
     }
 }
 
-static void open_selected_detail(struct app_state *state, const struct process_row *row)
+static int refresh_selected_detail(struct app_state *state)
+{
+    struct process_detail detail;
+    if (process_detail_read(state->selected_pid, &detail) != 0 ||
+        detail.row.starttime != state->selected_starttime) {
+        return -1;
+    }
+    state->selected_detail = detail;
+    return 0;
+}
+
+static void open_selected_detail(struct app_state *state,
+                                 const struct process_row *row,
+                                 enum app_screen screen)
 {
     state->selected_pid = row->pid;
     state->selected_starttime = row->starttime;
     if (process_detail_read(row->pid, &state->selected_detail) == 0 &&
         state->selected_detail.row.starttime == row->starttime) {
-        state->screen = SCREEN_DETAIL;
+        state->screen = screen;
     } else {
         set_notice(state, "Process changed or exited before it could be inspected.");
         state->screen = SCREEN_PROCESSES;
     }
 }
 
-static void open_signal_confirm(struct app_state *state,
-                                const struct process_row *row,
-                                int force)
+static void open_confirm_from_detail(struct app_state *state, int force)
 {
-    state->selected_pid = row->pid;
-    state->selected_starttime = row->starttime;
-    if (process_detail_read(row->pid, &state->selected_detail) != 0 ||
-        state->selected_detail.row.starttime != row->starttime) {
-        set_notice(state, "Process changed or exited before it could be selected.");
+    if (refresh_selected_detail(state) != 0) {
+        set_notice(state, "Process exited or its PID was reused.");
         state->screen = SCREEN_PROCESSES;
         return;
     }
@@ -1117,12 +1254,22 @@ static void handle_signal_confirm(struct app_state *state, int force)
         return;
     }
 
-    int signal_number = force ? SIGKILL : SIGTERM;
     enum process_signal_result result = process_send_signal(state->selected_detail.row.pid,
                                                             state->selected_detail.row.starttime,
-                                                            signal_number);
+                                                            force ? SIGKILL : SIGTERM);
     set_signal_notice(state, result, force, state->selected_detail.row.name);
     state->screen = SCREEN_PROCESSES;
+}
+
+static int refresh_overview(struct app_state *state)
+{
+    if (collect_overview(&state->view) != 0) {
+        state->view_ok = 0;
+        return -1;
+    }
+    state->view_ok = 1;
+    history_push(&state->view);
+    return 0;
 }
 
 static int run_interactive(void)
@@ -1130,7 +1277,9 @@ static int run_interactive(void)
     struct app_state state;
     memset(&state, 0, sizeof(state));
     state.screen = SCREEN_OVERVIEW;
+    state.return_screen = SCREEN_OVERVIEW;
     state.sort = SORT_MEMORY;
+    state.lesson = TEACH_CPU;
 
     if (signal(SIGINT, handle_stop) == SIG_ERR || signal(SIGTERM, handle_stop) == SIG_ERR) {
         fputs("rookietop: could not install signal handler\n", stderr);
@@ -1153,14 +1302,24 @@ static int run_interactive(void)
         struct terminal_size term = terminal_size();
 
         if (state.screen == SCREEN_OVERVIEW) {
-            if (show_overview(1) != 0) {
+            if (refresh_overview(&state) != 0) {
                 return 1;
+            }
+            if (term.cols < MIN_FULL_COLS || term.rows < MIN_FULL_ROWS) {
+                fputs("\033[H\033[J", stdout);
+                render_compact(&state.view);
+                printf("\nResize to at least %dx%d for the interactive teaching layout.\n", MIN_FULL_COLS, MIN_FULL_ROWS);
+            } else {
+                render_overview(&state.view, term);
             }
             fflush(stdout);
             key = terminal_input_read_key(FRAME_WAIT_MS);
             if (key == 'p') {
                 state.screen = SCREEN_PROCESSES;
                 state.notice[0] = '\0';
+            } else if (key == '?' || key == 'l' || key == 'L') {
+                state.return_screen = SCREEN_OVERVIEW;
+                state.screen = SCREEN_LEARN_MENU;
             }
         } else if (state.screen == SCREEN_PROCESSES) {
             struct process_row *rows = NULL;
@@ -1188,11 +1347,13 @@ static int run_interactive(void)
                 state.selected_pid = rows[state.selected].pid;
                 state.selected_starttime = rows[state.selected].starttime;
             } else if (key == INPUT_ENTER && count > 0) {
-                open_selected_detail(&state, &rows[state.selected]);
+                open_selected_detail(&state, &rows[state.selected], SCREEN_DETAIL);
+            } else if (key == '?' && count > 0) {
+                open_selected_detail(&state, &rows[state.selected], SCREEN_PROCESS_LEARN);
             } else if (key == 'k' && count > 0) {
-                open_signal_confirm(&state, &rows[state.selected], 0);
+                open_selected_detail(&state, &rows[state.selected], SCREEN_CONFIRM_TERM);
             } else if (key == 'K' && count > 0) {
-                open_signal_confirm(&state, &rows[state.selected], 1);
+                open_selected_detail(&state, &rows[state.selected], SCREEN_CONFIRM_KILL);
             } else if (key == 'm') {
                 state.sort = SORT_MEMORY;
                 state.selected_pid = 0;
@@ -1205,20 +1366,38 @@ static int run_interactive(void)
                 state.sort = SORT_NAME;
                 state.selected_pid = 0;
                 state.selected = 0;
+            } else if (key == 'l' || key == 'L') {
+                state.return_screen = SCREEN_PROCESSES;
+                state.screen = SCREEN_LEARN_MENU;
             } else if (key == INPUT_ESCAPE) {
                 state.screen = SCREEN_OVERVIEW;
             }
             process_list_free(rows);
         } else if (state.screen == SCREEN_DETAIL) {
-            struct process_detail detail;
-            if (process_detail_read(state.selected_pid, &detail) != 0 ||
-                detail.row.starttime != state.selected_starttime) {
+            if (refresh_selected_detail(&state) != 0) {
                 set_notice(&state, "Process exited or its PID was reused.");
                 state.screen = SCREEN_PROCESSES;
                 continue;
             }
-            state.selected_detail = detail;
-            render_detail(&detail, term);
+            render_process_detail(&state.selected_detail, term);
+            fflush(stdout);
+            key = terminal_input_read_key(PROCESS_WAIT_MS);
+            if (key == '?') {
+                state.screen = SCREEN_PROCESS_LEARN;
+            } else if (key == 'k') {
+                state.screen = SCREEN_CONFIRM_TERM;
+            } else if (key == 'K') {
+                state.screen = SCREEN_CONFIRM_KILL;
+            } else if (key == INPUT_ESCAPE) {
+                state.screen = SCREEN_PROCESSES;
+            }
+        } else if (state.screen == SCREEN_PROCESS_LEARN) {
+            if (refresh_selected_detail(&state) != 0) {
+                set_notice(&state, "Process exited or its PID was reused.");
+                state.screen = SCREEN_PROCESSES;
+                continue;
+            }
+            render_process_learning(&state.selected_detail, term);
             fflush(stdout);
             key = terminal_input_read_key(PROCESS_WAIT_MS);
             if (key == 'k') {
@@ -1228,8 +1407,40 @@ static int run_interactive(void)
             } else if (key == INPUT_ESCAPE) {
                 state.screen = SCREEN_PROCESSES;
             }
+        } else if (state.screen == SCREEN_LEARN_MENU) {
+            render_learn_menu(&state, term);
+            fflush(stdout);
+            key = terminal_input_read_key(-1);
+            if (key == INPUT_UP && state.learn_selected > 0) {
+                state.learn_selected--;
+            } else if (key == INPUT_DOWN && state.learn_selected + 1 < teaching_count()) {
+                state.learn_selected++;
+            } else if (key == INPUT_ENTER) {
+                state.lesson = (enum teaching_concept)state.learn_selected;
+                state.screen = SCREEN_LEARN_TOPIC;
+            } else if (key == INPUT_ESCAPE) {
+                state.screen = state.return_screen;
+            }
+        } else if (state.screen == SCREEN_LEARN_TOPIC) {
+            render_lesson(&state, term);
+            fflush(stdout);
+            key = terminal_input_read_key(-1);
+            if (key == 'n' || key == 'N') {
+                state.lesson = (enum teaching_concept)(((int)state.lesson + 1) % TEACH_COUNT);
+                state.learn_selected = (size_t)state.lesson;
+            } else if (key == 'b' || key == 'B') {
+                state.lesson = (enum teaching_concept)(((int)state.lesson + TEACH_COUNT - 1) % TEACH_COUNT);
+                state.learn_selected = (size_t)state.lesson;
+            } else if (key == INPUT_ESCAPE) {
+                state.screen = SCREEN_LEARN_MENU;
+            }
         } else {
             int force = state.screen == SCREEN_CONFIRM_KILL;
+            if (refresh_selected_detail(&state) != 0) {
+                set_notice(&state, "Process exited or its PID was reused.");
+                state.screen = SCREEN_PROCESSES;
+                continue;
+            }
             render_confirm(&state.selected_detail, term, force);
             fflush(stdout);
             key = terminal_input_read_key(-1);
@@ -1258,7 +1469,13 @@ static int run_monitor(int force_once)
     use_color = output_terminal && getenv("NO_COLOR") == NULL;
 
     if (!interactive) {
-        return show_overview(0);
+        struct overview view;
+        if (collect_overview(&view) != 0) {
+            fputs("rookietop: could not read system data\n", stderr);
+            return 1;
+        }
+        render_compact(&view);
+        return 0;
     }
     return run_interactive();
 }
