@@ -32,11 +32,11 @@ Exit gate: CPU calculation is correct against known fixtures and works on a real
 
 Goal: demonstrate that RookieTop explains Linux rather than merely displaying numbers.
 
-- [ ] parse `/proc/meminfo`
-- [ ] use `MemAvailable` semantics
-- [ ] show total, available, used, and swap
-- [ ] provide conservative beginner explanation
-- [ ] fixture tests for common and missing fields
+- [x] parse `/proc/meminfo`
+- [x] use `MemAvailable` semantics
+- [x] show total, available, used, and swap
+- [x] provide conservative beginner explanation
+- [x] fixture tests for common and missing fields
 
 Exit gate: the UI does not equate Linux cache with a memory problem.
 
