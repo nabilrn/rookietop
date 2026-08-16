@@ -14,11 +14,7 @@ Goal: establish the smallest reliable C project.
 - [x] C systems-programming agent rules
 - [x] verify bootstrap CI on GitHub Actions
 
-Exit gate: GCC and Clang build cleanly and `make check` passes.
-
 ## Phase 1 — CPU + sampling model
-
-Goal: prove the low-level collector architecture with one useful metric.
 
 - [x] parse aggregate CPU counters from `/proc/stat`
 - [x] calculate usage from two samples
@@ -26,11 +22,7 @@ Goal: prove the low-level collector architecture with one useful metric.
 - [x] explain that CPU usage is derived from counter deltas
 - [x] unit-test parsing and delta math with fixtures
 
-Exit gate: CPU calculation is correct against known fixtures and works on a real Linux host without root.
-
 ## Phase 2 — Memory + beginner semantics
-
-Goal: demonstrate that RookieTop explains Linux rather than merely displaying numbers.
 
 - [x] parse `/proc/meminfo`
 - [x] use `MemAvailable` semantics
@@ -38,36 +30,33 @@ Goal: demonstrate that RookieTop explains Linux rather than merely displaying nu
 - [x] provide conservative beginner explanation
 - [x] fixture tests for common and missing fields
 
-Exit gate: the UI does not equate Linux cache with a memory problem.
-
 ## Phase 3 — Disk + network
 
-- [ ] root filesystem capacity using `statvfs()`
-- [ ] network counters from `/proc/net/dev`
-- [ ] calculate RX/TX rates from sample deltas
-- [ ] degrade gracefully when interfaces appear/disappear
-
-Exit gate: rates are stable, bounded, and do not require subprocesses.
+- [x] root filesystem capacity using `statvfs()`
+- [x] network counters from `/proc/net/dev`
+- [x] calculate RX/TX rates from sample deltas
+- [x] degrade gracefully when counters regress or interface state changes
 
 ## Phase 4 — Processes
 
-- [ ] enumerate numeric `/proc/<pid>` entries
-- [ ] parse only fields RookieTop displays
-- [ ] rank top CPU and memory consumers
-- [ ] handle process churn without noisy errors
-- [ ] expose technical source/detail view
+- [x] enumerate numeric `/proc/<pid>` entries
+- [x] parse only fields RookieTop displays
+- [x] rank top memory consumers with a fixed-size list
+- [ ] sample and rank top CPU consumers
+- [x] handle process churn without noisy errors
+- [x] show the process data source in the dashboard
 
-Exit gate: the default UI remains readable on hosts with many processes.
+Phase 4 remains intentionally partial until VM testing shows that per-process CPU ranking justifies the extra sampling state.
 
 ## Phase 5 — Beginner dashboard
 
-- [ ] single-screen overview
-- [ ] `Normal` / `Attention` / `Critical` presentation
-- [ ] optional explanation/detail interaction
-- [ ] ANSI terminal handling with no required TUI framework
-- [ ] usable monochrome fallback
+- [x] single-screen overview
+- [x] beginner-readable health labels
+- [x] inline explanations
+- [x] ANSI terminal refresh with no TUI framework
+- [x] non-TTY and `--once` one-shot fallback
 
-Exit gate: a first-time Linux user can identify the main resource pressure without understanding process-monitor jargon.
+The dashboard is considered alpha-ready for manual VM testing.
 
 ## Phase 6 — Localization
 
@@ -77,8 +66,6 @@ Exit gate: a first-time Linux user can identify the main resource pressure witho
 - [ ] English fallback for unknown/missing locale
 - [ ] prevent collector/diagnosis duplication by language
 
-Exit gate: both languages expose the same metrics and behavior.
-
 ## Phase 7 — v0.1 hardening
 
 - [ ] test Ubuntu/Debian family
@@ -87,9 +74,7 @@ Exit gate: both languages expose the same metrics and behavior.
 - [ ] test missing/partial sysfs features
 - [ ] measure idle CPU and RSS
 - [ ] document supported Linux assumptions
-- [ ] release one Linux binary per supported architecture only when actually tested
-
-Exit gate: no distro-specific core collector is required for supported metrics, CI is green, and measured overhead is documented.
+- [ ] release tested Linux binaries
 
 ## Deferred until justified
 

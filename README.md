@@ -8,7 +8,7 @@ It aims to answer three questions clearly:
 2. **Should I care?**
 3. **How does Linux expose this information?**
 
-RookieTop intentionally reads Linux interfaces such as `/proc`, `/sys`, and small POSIX/Linux APIs directly instead of hiding them behind a system-metrics framework.
+RookieTop reads Linux interfaces such as `/proc` and small POSIX/Linux APIs directly instead of hiding system state behind a metrics framework.
 
 ## Project principles
 
@@ -20,20 +20,22 @@ RookieTop intentionally reads Linux interfaces such as `/proc`, `/sys`, and smal
 - **Linux-first, distro-agnostic.** Depend on kernel interfaces, not distro package managers.
 - **Measure before optimizing.** No complexity justified only by hypothetical performance.
 
-## Initial scope
+## Alpha features
 
-The first usable release will cover:
+`0.1.0-alpha.1` currently includes:
 
-- system overview
-- CPU
-- memory
-- disk/filesystem
-- network
-- processes
-- simple health explanations
-- English and Indonesian text
+- aggregate CPU usage from `/proc/stat`
+- memory and swap from `/proc/meminfo` using `MemAvailable`
+- root filesystem capacity through `statvfs()`
+- aggregate non-loopback network throughput from `/proc/net/dev`
+- top memory-consuming processes from `/proc/<pid>/status`
+- beginner-readable health labels and explanations
+- live ANSI refresh in an interactive terminal
+- one-shot output for scripts and CI
 
-See [`docs/SCOPE.md`](docs/SCOPE.md) and [`docs/ROADMAP.md`](docs/ROADMAP.md) for the boundaries and delivery plan.
+Per-process CPU ranking, localization, temperature, and multi-distro hardening are still pending.
+
+See [`docs/SCOPE.md`](docs/SCOPE.md), [`docs/ROADMAP.md`](docs/ROADMAP.md), and [`docs/VM-TEST.md`](docs/VM-TEST.md).
 
 ## Build
 
@@ -48,12 +50,20 @@ make
 ./rookietop
 ```
 
+In an interactive terminal, `./rookietop` refreshes roughly once per second. Press `Ctrl+C` to quit.
+
+For one snapshot:
+
+```sh
+./rookietop --once
+```
+
 Developer checks:
 
 ```sh
-make check
+make clean check
 ```
 
 ## Status
 
-Phases 1 and 2 are implemented. RookieTop reads CPU accounting from `/proc/stat` and memory state from `/proc/meminfo`, using `MemAvailable` so Linux filesystem cache is not mistaken for wasted memory. Disk and network are next.
+The first manual-test alpha is ready for Linux VM validation. The next work should be driven by real VM observations before adding more collector complexity.
