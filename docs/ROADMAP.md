@@ -12,7 +12,7 @@ Goal: establish the smallest reliable C project.
 - [x] sanitizer debug build
 - [x] CI compile and smoke checks
 - [x] C systems-programming agent rules
-- [ ] verify bootstrap CI on GitHub Actions
+- [x] verify bootstrap CI on GitHub Actions
 
 Exit gate: GCC and Clang build cleanly and `make check` passes.
 
@@ -20,11 +20,11 @@ Exit gate: GCC and Clang build cleanly and `make check` passes.
 
 Goal: prove the low-level collector architecture with one useful metric.
 
-- [ ] parse aggregate CPU counters from `/proc/stat`
-- [ ] calculate usage from two samples
-- [ ] show current CPU percentage
-- [ ] explain that CPU usage is derived from counter deltas
-- [ ] unit-test parsing and delta math with fixtures
+- [x] parse aggregate CPU counters from `/proc/stat`
+- [x] calculate usage from two samples
+- [x] show current CPU percentage
+- [x] explain that CPU usage is derived from counter deltas
+- [x] unit-test parsing and delta math with fixtures
 
 Exit gate: CPU calculation is correct against known fixtures and works on a real Linux host without root.
 
