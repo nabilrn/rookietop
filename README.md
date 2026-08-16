@@ -22,17 +22,20 @@ RookieTop reads Linux interfaces such as `/proc` and small POSIX/Linux APIs dire
 
 ## Alpha features
 
-`0.1.0-alpha.2` currently includes:
+`0.1.0-alpha.3` currently includes:
 
 - aggregate CPU usage from `/proc/stat`
 - memory and swap from `/proc/meminfo` using `MemAvailable`
 - root filesystem capacity through `statvfs()`
 - aggregate non-loopback network throughput from `/proc/net/dev`
 - top memory-consuming processes from `/proc/<pid>/status`
+- full-screen interactive terminal dashboard using ANSI escape sequences
+- terminal-size-aware layout via `ioctl(TIOCGWINSZ)`
+- alternate screen buffer so the previous shell screen is restored on exit
 - compact resource bars and semantic health colors
-- concise beginner-readable insight instead of always-on explanation walls
-- low-flicker live ANSI refresh in an interactive terminal
-- automatic cursor cleanup on `Ctrl+C` / `SIGTERM`
+- concise beginner-readable insight
+- automatic terminal cleanup on `Ctrl+C` / `SIGTERM`
+- compact fallback for terminals smaller than 80x24
 - one-shot output for scripts and CI
 - `NO_COLOR` support and plain non-TTY output
 
@@ -53,7 +56,7 @@ make
 ./rookietop
 ```
 
-In an interactive terminal, `./rookietop` refreshes roughly once per second. Press `Ctrl+C` to quit.
+In an interactive terminal, `./rookietop` opens a full-screen dashboard and refreshes roughly once per second. Press `Ctrl+C` to quit; the original terminal screen is restored automatically.
 
 For one snapshot:
 
@@ -75,4 +78,4 @@ make clean check
 
 ## Status
 
-The first manual-test alpha is running on a real Linux VM. Alpha 2 focuses on presentation and terminal behavior without adding collector complexity.
+The alpha is being validated on a real Linux VM. Alpha 3 focuses on making interactive monitoring feel like a proper full-screen terminal application without adding ncurses or another TUI dependency.
