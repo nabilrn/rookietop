@@ -22,16 +22,19 @@ RookieTop reads Linux interfaces such as `/proc` and small POSIX/Linux APIs dire
 
 ## Alpha features
 
-`0.1.0-alpha.1` currently includes:
+`0.1.0-alpha.2` currently includes:
 
 - aggregate CPU usage from `/proc/stat`
 - memory and swap from `/proc/meminfo` using `MemAvailable`
 - root filesystem capacity through `statvfs()`
 - aggregate non-loopback network throughput from `/proc/net/dev`
 - top memory-consuming processes from `/proc/<pid>/status`
-- beginner-readable health labels and explanations
-- live ANSI refresh in an interactive terminal
+- compact resource bars and semantic health colors
+- concise beginner-readable insight instead of always-on explanation walls
+- low-flicker live ANSI refresh in an interactive terminal
+- automatic cursor cleanup on `Ctrl+C` / `SIGTERM`
 - one-shot output for scripts and CI
+- `NO_COLOR` support and plain non-TTY output
 
 Per-process CPU ranking, localization, temperature, and multi-distro hardening are still pending.
 
@@ -58,6 +61,12 @@ For one snapshot:
 ./rookietop --once
 ```
 
+Disable terminal colors when needed:
+
+```sh
+NO_COLOR=1 ./rookietop
+```
+
 Developer checks:
 
 ```sh
@@ -66,4 +75,4 @@ make clean check
 
 ## Status
 
-The first manual-test alpha is ready for Linux VM validation. The next work should be driven by real VM observations before adding more collector complexity.
+The first manual-test alpha is running on a real Linux VM. Alpha 2 focuses on presentation and terminal behavior without adding collector complexity.

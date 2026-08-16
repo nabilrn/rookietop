@@ -52,11 +52,16 @@ Phase 4 remains intentionally partial until VM testing shows that per-process CP
 
 - [x] single-screen overview
 - [x] beginner-readable health labels
-- [x] inline explanations
+- [x] concise primary insight
+- [x] compact CPU / memory / disk resource bars
+- [x] semantic terminal colors with `NO_COLOR` fallback
 - [x] ANSI terminal refresh with no TUI framework
+- [x] lower-flicker cursor-home refresh instead of full clearing each frame
+- [x] hide and restore the terminal cursor during live mode
 - [x] non-TTY and `--once` one-shot fallback
+- [ ] optional interactive explanation/detail view
 
-The dashboard is considered alpha-ready for manual VM testing.
+Alpha 2 focuses on making the monitor readable before adding more collectors.
 
 ## Phase 6 — Localization
 
