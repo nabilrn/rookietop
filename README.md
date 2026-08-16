@@ -16,13 +16,13 @@ RookieTop reads Linux interfaces such as `/proc`, `/sys`, and small POSIX/Linux 
 - **Low-level implementation.** Learn from Linux interfaces directly.
 - **Small code over clever code.** Prefer the shortest correct implementation that remains readable.
 - **Zero daemon, zero database.** One local process and one binary for the core monitor.
-- **No root for normal monitoring.** Privileged features are not part of the core experience.
+- **No root for normal monitoring.** RookieTop does not auto-escalate privileges.
 - **Linux-first, distro-agnostic.** Depend on kernel interfaces, not distro package managers.
 - **Measure before optimizing.** No complexity justified only by hypothetical performance.
 
 ## Alpha features
 
-`0.1.0-alpha.4` includes:
+`0.1.0-alpha.5` includes:
 
 - aggregate CPU usage from `/proc/stat`
 - memory and swap from `/proc/meminfo` using `MemAvailable`
@@ -34,6 +34,12 @@ RookieTop reads Linux interfaces such as `/proc`, `/sys`, and small POSIX/Linux 
 - top memory-consuming processes from `/proc/<pid>/status`
 - short CPU and memory activity history held in a fixed in-memory buffer
 - full-screen interactive terminal dashboard using ANSI escape sequences
+- process explorer using raw `termios` + `poll` + `read` keyboard input
+- process details including PID, RSS, state, thread count, and command line
+- process sorting by memory, PID, or name
+- confirmed SIGTERM and separately confirmed SIGKILL actions
+- PID-reuse protection by verifying `/proc/<pid>/stat` start time before signalling
+- explicit permission / exited / PID-reused feedback instead of auto-sudo
 - terminal-size-aware layout via `ioctl(TIOCGWINSZ)`
 - alternate screen buffer so the previous shell screen is restored on exit
 - semantic health colors and beginner-readable insight
@@ -41,6 +47,31 @@ RookieTop reads Linux interfaces such as `/proc`, `/sys`, and small POSIX/Linux 
 - compact fallback for smaller terminals
 - one-shot output for scripts and CI
 - `NO_COLOR` support and plain non-TTY output
+
+### Interactive keys
+
+From the overview:
+
+```text
+p        process explorer
+q        quit
+```
+
+Inside the process explorer:
+
+```text
+Up/Down  select process
+Enter    inspect process
+m        sort by memory
+p        sort by PID
+n        sort by name
+k        request graceful stop with SIGTERM
+K        request force stop with SIGKILL
+Esc      return to overview
+q        quit
+```
+
+RookieTop never escalates SIGTERM to SIGKILL automatically. `K` is intentionally a separate action with a separate confirmation because SIGKILL prevents a process from running cleanup handlers.
 
 ### Metric semantics
 
@@ -66,7 +97,7 @@ make
 ./rookietop
 ```
 
-In an interactive terminal, `./rookietop` opens a full-screen dashboard and refreshes roughly once per second. Press `Ctrl+C` to quit; the original terminal screen is restored automatically.
+In an interactive terminal, `./rookietop` opens a full-screen dashboard. Press `p` for the process explorer or `Ctrl+C` to quit; the original terminal screen and terminal mode are restored automatically.
 
 For one snapshot:
 
@@ -88,4 +119,4 @@ make clean check
 
 ## Status
 
-Alpha 4 focuses on useful observability depth without changing the core model: one local binary, no daemon, no root, no ncurses, and no metrics framework.
+Alpha 5 adds interactive process inspection and safe process signalling while keeping the core model: one local binary, no daemon, no root escalation, no ncurses, and no metrics framework. The larger visual redesign remains intentionally separate so it can follow a dedicated TUI mockup rather than another guessed layout.
