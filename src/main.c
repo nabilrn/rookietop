@@ -1385,9 +1385,9 @@ static int run_interactive(void)
             if (key == '?') {
                 state.screen = SCREEN_PROCESS_LEARN;
             } else if (key == 'k') {
-                state.screen = SCREEN_CONFIRM_TERM;
+                open_confirm_from_detail(&state, 0);
             } else if (key == 'K') {
-                state.screen = SCREEN_CONFIRM_KILL;
+                open_confirm_from_detail(&state, 1);
             } else if (key == INPUT_ESCAPE) {
                 state.screen = SCREEN_PROCESSES;
             }
@@ -1401,9 +1401,9 @@ static int run_interactive(void)
             fflush(stdout);
             key = terminal_input_read_key(PROCESS_WAIT_MS);
             if (key == 'k') {
-                state.screen = SCREEN_CONFIRM_TERM;
+                open_confirm_from_detail(&state, 0);
             } else if (key == 'K') {
-                state.screen = SCREEN_CONFIRM_KILL;
+                open_confirm_from_detail(&state, 1);
             } else if (key == INPUT_ESCAPE) {
                 state.screen = SCREEN_PROCESSES;
             }
