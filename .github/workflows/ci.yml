@@ -29,6 +29,7 @@ jobs:
           make clean
           make CC=gcc debug
           ./tests/test_cpu
+          ./tests/test_memory
           ./rookietop --help >/dev/null
           ./rookietop --version >/dev/null
           ./rookietop >/dev/null
