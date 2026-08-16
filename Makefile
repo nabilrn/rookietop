@@ -29,7 +29,7 @@ DIAGNOSIS_TEST_SRC := tests/test_diagnosis.c src/diagnosis.c
 HOST_TEST := tests/test_host
 HOST_TEST_SRC := tests/test_host.c src/host.c
 
-.PHONY: all clean check debug test
+.PHONY: all clean check debug stress test
 
 all: $(TARGET)
 
@@ -112,6 +112,9 @@ check: $(TARGET) test
 	./$(TARGET) --help >/dev/null
 	./$(TARGET) --version >/dev/null
 	./$(TARGET) --once >/dev/null
+
+stress: $(TARGET)
+	python3 tests/stress_runtime.py
 
 clean:
 	rm -f $(TARGET) $(CPU_TEST) $(MEMORY_TEST) $(DISK_TEST) $(NETWORK_TEST) $(PROCESS_TEST) $(PROCESS_CPU_TEST) $(PROCESS_LIST_TEST) $(PROCESS_QUERY_TEST) $(TEACHING_TEST) $(DIAGNOSIS_TEST) $(HOST_TEST)

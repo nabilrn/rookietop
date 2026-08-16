@@ -53,11 +53,11 @@ Goal: establish the smallest reliable C project.
 - [x] separately confirmed Force Kill with SIGKILL
 - [x] verify process start time immediately before signalling
 - [x] explain SIGTERM vs SIGKILL before an action
-- [x] process name/PID search and filter
+- [x] process name/PID search/filter
 - [x] all-process CPU column and CPU sorting
-- [x] preserve selected process across sort/refresh using PID + start time
+- [x] keep selection on the same process identity across sort/refresh
 
-The CPU sampler uses short-lived allocation only to match PIDs across the sampling window; it does not keep a daemon-style process database. Process control never auto-escalates privileges or SIGTERM to SIGKILL. Process search is an in-memory substring filter and does not shell out to another command.
+The CPU sampler uses short-lived allocation only to match PIDs across the sampling window; it does not keep a daemon-style process database. Process control never auto-escalates privileges or SIGTERM to SIGKILL.
 
 ## Phase 5 — Beginner dashboard
 
@@ -74,7 +74,7 @@ The CPU sampler uses short-lived allocation only to match PIDs across the sampli
 - [x] non-TTY and `--once` one-shot fallback
 - [x] raw keyboard input using termios/poll/read
 - [x] progressive-disclosure copy pass: plain language before Linux internals
-- [ ] final UX pass from real beginner testing
+- [ ] dedicated visual redesign from a TUI mockup
 
 ## Phase 5.5 — Teaching Engine
 
@@ -99,7 +99,7 @@ Goal: make RookieTop a Linux learning environment, not merely a monitor with exp
 - [x] distinguish high load with low CPU from likely CPU queueing
 - [x] preselect the most relevant lesson from current system evidence
 - [x] deterministic contextual-diagnosis tests and sanitizer coverage
-- [ ] guided mini-labs that observe whether the experiment changed the real system
+- [ ] optional guided mini-labs with completion state
 
 Teaching and diagnosis must not duplicate collector logic. They consume normalized live data, explain the evidence conservatively, and expose the Linux source only when the user asks to go deeper.
 
@@ -111,16 +111,20 @@ Teaching and diagnosis must not duplicate collector logic. They consume normaliz
 - [ ] English fallback for unknown/missing locale
 - [ ] prevent collector/diagnosis duplication by language
 
-## Phase 7 — Stable hardening
+## Phase 7 — Runtime stability + v0.1 hardening
 
+- [x] add automated pseudo-terminal stress smoke with process churn
+- [x] measure RSS growth, average CPU, and interactive sort-key latency
+- [x] make the same stress harness configurable for 30m/2h/8h soak runs
+- [ ] eliminate progressive long-session slowdown found in real VM testing
+- [ ] complete at least one 8-hour soak qualification
 - [ ] test Ubuntu/Debian family
 - [ ] test Fedora/RHEL family
 - [ ] test Arch family
 - [ ] test missing/partial sysfs features
-- [ ] measure idle CPU and RSS
+- [ ] measure normal idle CPU and RSS outside stress mode
 - [ ] document supported Linux assumptions
-- [ ] qualify common terminal sizes and SSH use
-- [ ] release tested x86_64 and arm64 Linux binaries
+- [ ] release tested Linux binaries
 
 ## Deferred until justified
 
