@@ -27,7 +27,7 @@ It reads Linux interfaces such as `/proc`, `/sys`, `statvfs()`, and `kill(2)` di
 
 ## Alpha features
 
-`0.1.0-alpha.7` includes:
+`0.1.0-alpha.8` includes:
 
 - aggregate CPU usage from `/proc/stat`
 - memory and swap from `/proc/meminfo` using `MemAvailable`
@@ -39,7 +39,10 @@ It reads Linux interfaces such as `/proc`, `/sys`, `statvfs()`, and `kill(2)` di
 - top memory-consuming processes from `/proc/<pid>/status`
 - short CPU and memory activity history in a fixed in-memory buffer
 - full-screen ANSI terminal UI with raw `termios` + `poll` + `read` input
-- all-process explorer with selection, sorting, inspection, and beginner-readable process states
+- all-process explorer with selection, inspection, beginner-readable states, and CPU/memory/PID/name sorting
+- `/` process search by case-insensitive name or PID substring
+- current per-process CPU share calculated from a short `/proc/<pid>/stat` delta against `/proc/stat`
+- stable process selection across refreshes and sort changes using PID + process start time
 - confirmed **Stop safely** via SIGTERM and separately confirmed **Force kill** via SIGKILL
 - PID-reuse protection by verifying process start time immediately before signalling
 - teaching topics for CPU, memory, load, processes, PID, process states, signals, disk, and network
@@ -80,7 +83,7 @@ TRY IT
     A small experiment on your own machine
 ```
 
-The Process Explorer follows the same rule. The list shows readable labels such as `Sleeping` and a short **ABOUT THIS PROCESS** panel. PID reuse, RSS, procfs fields, and signal internals stay behind `? Explain` until the user asks for them.
+The Process Explorer follows the same rule. The list shows readable labels such as `Sleeping`, current CPU/memory context, and a short **ABOUT THIS PROCESS** panel. PID reuse, RSS, procfs fields, and signal internals stay behind `? Explain` until the user asks for them.
 
 ## Interactive keys
 
@@ -96,8 +99,10 @@ Inside Process Explorer:
 
 ```text
 Up/Down  Move
+/        Search by process name or PID
 Enter    Details
 ?        Explain selected process
+c        Sort by CPU
 m        Sort by memory
 p        Sort by PID
 n        Sort by name
@@ -107,12 +112,14 @@ Esc      Back
 q        Quit
 ```
 
+Search is intentionally simple: type part of a process name or PID and press Enter. An empty search clears the filter. RookieTop does not invoke `ps`, `grep`, or another subprocess for search.
+
 RookieTop never escalates SIGTERM to SIGKILL automatically. `K` is intentionally a separate action and warning.
 
 ## Metric semantics
 
 - **Memory** uses `MemAvailable`; Linux filesystem cache is not treated as wasted RAM.
-- **Process CPU** is a process share of whole-machine CPU time during the short sample window.
+- **Process CPU** is a process share of whole-machine CPU time during the short sample window. It is not a per-core percentage.
 - **Load average** is queue/wait pressure relative to online CPUs, not another CPU percentage.
 - **Process state** is translated into readable meaning; `Sleeping` is commonly a normal waiting state.
 - **Thermal** is optional because many VMs do not expose thermal zones through sysfs.
@@ -152,4 +159,4 @@ make clean check
 
 ## Status
 
-Alpha 7 adds the first contextual diagnosis layer and a full copywriting pass around progressive disclosure. The next major product work is process search/CPU sorting, guided mini-labs, localization, distro qualification, and a dedicated final TUI visual redesign.
+Alpha 8 completes the first usable Process Explorer interaction set: search, CPU/memory/PID/name sorting, stable selection, inspection, explanation, and safe process actions. The largest remaining product gaps are guided mini-labs, localization, distro qualification, performance/release hardening, and a final UX pass rather than a visual-heavy TUI redesign.
