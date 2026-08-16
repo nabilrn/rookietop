@@ -35,6 +35,7 @@ jobs:
           ./tests/test_process
           ./tests/test_process_cpu
           ./tests/test_process_list
+          ./tests/test_process_query
           ./tests/test_teaching
           ./tests/test_diagnosis
           ./tests/test_host
