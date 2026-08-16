@@ -23,6 +23,10 @@ jobs:
       - name: Build and test
         run: make CC=${{ matrix.cc }} clean check
 
+      - name: Runtime stress smoke
+        if: matrix.cc == 'gcc'
+        run: ROOKIETOP_STRESS_SECONDS=12 make stress
+
       - name: Sanitizer build and test
         if: matrix.cc == 'gcc'
         run: |
