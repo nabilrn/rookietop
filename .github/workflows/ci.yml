@@ -20,13 +20,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build and smoke test
+      - name: Build and test
         run: make CC=${{ matrix.cc }} clean check
 
-      - name: Sanitizer build and smoke test
+      - name: Sanitizer build and test
         if: matrix.cc == 'gcc'
         run: |
           make clean
           make CC=gcc debug
+          ./tests/test_cpu
           ./rookietop --help >/dev/null
           ./rookietop --version >/dev/null
+          ./rookietop >/dev/null

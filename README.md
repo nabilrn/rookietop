@@ -56,4 +56,4 @@ make check
 
 ## Status
 
-Early bootstrap. The architecture and engineering rules are intentionally defined before collectors are implemented.
+Phase 1 is implemented: RookieTop reads aggregate CPU counters directly from `/proc/stat`, derives usage from two samples, and explains the result in beginner-friendly terms. Memory is the next scoped collector.

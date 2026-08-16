@@ -1,4 +1,5 @@
 rookietop
+tests/test_cpu
 build/
 *.o
 *.d
