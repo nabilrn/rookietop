@@ -5,7 +5,7 @@ LDFLAGS ?=
 LDLIBS ?=
 
 TARGET := rookietop
-SRC := src/main.c src/cpu.c src/memory.c src/disk.c src/network.c src/process.c src/process_cpu.c src/process_list.c src/teaching.c src/terminal_input.c src/host.c
+SRC := src/main.c src/cpu.c src/memory.c src/disk.c src/network.c src/process.c src/process_cpu.c src/process_list.c src/teaching.c src/diagnosis.c src/terminal_input.c src/host.c
 CPU_TEST := tests/test_cpu
 CPU_TEST_SRC := tests/test_cpu.c src/cpu.c
 MEMORY_TEST := tests/test_memory
@@ -22,6 +22,8 @@ PROCESS_LIST_TEST := tests/test_process_list
 PROCESS_LIST_TEST_SRC := tests/test_process_list.c src/process_list.c src/process_cpu.c
 TEACHING_TEST := tests/test_teaching
 TEACHING_TEST_SRC := tests/test_teaching.c src/teaching.c
+DIAGNOSIS_TEST := tests/test_diagnosis
+DIAGNOSIS_TEST_SRC := tests/test_diagnosis.c src/diagnosis.c
 HOST_TEST := tests/test_host
 HOST_TEST_SRC := tests/test_host.c src/host.c
 
@@ -56,10 +58,13 @@ $(PROCESS_LIST_TEST): $(PROCESS_LIST_TEST_SRC)
 $(TEACHING_TEST): $(TEACHING_TEST_SRC)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(TEACHING_TEST_SRC) $(LDFLAGS) -o $@
 
+$(DIAGNOSIS_TEST): $(DIAGNOSIS_TEST_SRC)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(DIAGNOSIS_TEST_SRC) $(LDFLAGS) -o $@
+
 $(HOST_TEST): $(HOST_TEST_SRC)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_TEST_SRC) $(LDFLAGS) -lm -o $@
 
-test: $(CPU_TEST) $(MEMORY_TEST) $(DISK_TEST) $(NETWORK_TEST) $(PROCESS_TEST) $(PROCESS_CPU_TEST) $(PROCESS_LIST_TEST) $(TEACHING_TEST) $(HOST_TEST)
+test: $(CPU_TEST) $(MEMORY_TEST) $(DISK_TEST) $(NETWORK_TEST) $(PROCESS_TEST) $(PROCESS_CPU_TEST) $(PROCESS_LIST_TEST) $(TEACHING_TEST) $(DIAGNOSIS_TEST) $(HOST_TEST)
 	./$(CPU_TEST)
 	./$(MEMORY_TEST)
 	./$(DISK_TEST)
@@ -68,6 +73,7 @@ test: $(CPU_TEST) $(MEMORY_TEST) $(DISK_TEST) $(NETWORK_TEST) $(PROCESS_TEST) $(
 	./$(PROCESS_CPU_TEST)
 	./$(PROCESS_LIST_TEST)
 	./$(TEACHING_TEST)
+	./$(DIAGNOSIS_TEST)
 	./$(HOST_TEST)
 
 debug:
@@ -90,6 +96,8 @@ debug:
 	$(CC) $(CPPFLAGS) -std=c11 -O0 -g3 -Wall -Wextra -Wpedantic -Werror \
 		-fsanitize=address,undefined $(TEACHING_TEST_SRC) -fsanitize=address,undefined -o $(TEACHING_TEST)
 	$(CC) $(CPPFLAGS) -std=c11 -O0 -g3 -Wall -Wextra -Wpedantic -Werror \
+		-fsanitize=address,undefined $(DIAGNOSIS_TEST_SRC) -fsanitize=address,undefined -o $(DIAGNOSIS_TEST)
+	$(CC) $(CPPFLAGS) -std=c11 -O0 -g3 -Wall -Wextra -Wpedantic -Werror \
 		-fsanitize=address,undefined $(HOST_TEST_SRC) -fsanitize=address,undefined -lm -o $(HOST_TEST)
 
 check: $(TARGET) test
@@ -98,4 +106,4 @@ check: $(TARGET) test
 	./$(TARGET) --once >/dev/null
 
 clean:
-	rm -f $(TARGET) $(CPU_TEST) $(MEMORY_TEST) $(DISK_TEST) $(NETWORK_TEST) $(PROCESS_TEST) $(PROCESS_CPU_TEST) $(PROCESS_LIST_TEST) $(TEACHING_TEST) $(HOST_TEST)
+	rm -f $(TARGET) $(CPU_TEST) $(MEMORY_TEST) $(DISK_TEST) $(NETWORK_TEST) $(PROCESS_TEST) $(PROCESS_CPU_TEST) $(PROCESS_LIST_TEST) $(TEACHING_TEST) $(DIAGNOSIS_TEST) $(HOST_TEST)
