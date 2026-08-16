@@ -36,6 +36,7 @@ jobs:
           ./tests/test_process_cpu
           ./tests/test_process_list
           ./tests/test_teaching
+          ./tests/test_diagnosis
           ./tests/test_host
           ./rookietop --help >/dev/null
           ./rookietop --version >/dev/null

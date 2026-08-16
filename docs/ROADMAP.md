@@ -72,6 +72,7 @@ The CPU sampler uses short-lived allocation only to match PIDs across the sampli
 - [x] host, kernel, uptime, load, and optional thermal context
 - [x] non-TTY and `--once` one-shot fallback
 - [x] raw keyboard input using termios/poll/read
+- [x] progressive-disclosure copy pass: plain language before Linux internals
 - [ ] dedicated visual redesign from a TUI mockup
 
 ## Phase 5.5 — Teaching Engine
@@ -91,10 +92,15 @@ Goal: make RookieTop a Linux learning environment, not merely a monitor with exp
 - [x] Process Inspector connects fields back to `/proc/<pid>/`
 - [x] Safe Stop / Force Kill confirmations teach signal semantics
 - [x] teaching catalog tests and sanitizer coverage
-- [ ] context-aware `Why is this high?` diagnosis using the current top contributors
+- [x] context-aware explanation for CPU, memory, disk, and load pressure
+- [x] connect high CPU to a visible top contributor when supported by the sample
+- [x] connect high memory to the largest visible memory user without claiming full causality
+- [x] distinguish high load with low CPU from likely CPU queueing
+- [x] preselect the most relevant lesson from current system evidence
+- [x] deterministic contextual-diagnosis tests and sanitizer coverage
 - [ ] optional guided mini-labs with completion state
 
-Teaching content must not duplicate collector logic. Lessons consume normalized live data and explain where that data originated.
+Teaching and diagnosis must not duplicate collector logic. They consume normalized live data, explain the evidence conservatively, and expose the Linux source only when the user asks to go deeper.
 
 ## Phase 6 — Localization
 
