@@ -8,7 +8,7 @@ It aims to answer three questions clearly:
 2. **Should I care?**
 3. **How does Linux expose this information?**
 
-RookieTop reads Linux interfaces such as `/proc` and small POSIX/Linux APIs directly instead of hiding system state behind a metrics framework.
+RookieTop reads Linux interfaces such as `/proc`, `/sys`, and small POSIX/Linux APIs directly instead of hiding system state behind a metrics framework.
 
 ## Project principles
 
@@ -22,24 +22,34 @@ RookieTop reads Linux interfaces such as `/proc` and small POSIX/Linux APIs dire
 
 ## Alpha features
 
-`0.1.0-alpha.3` currently includes:
+`0.1.0-alpha.4` includes:
 
 - aggregate CPU usage from `/proc/stat`
 - memory and swap from `/proc/meminfo` using `MemAvailable`
 - root filesystem capacity through `statvfs()`
 - aggregate non-loopback network throughput from `/proc/net/dev`
+- host name, kernel release, online CPU count, uptime, and load average
+- optional hottest thermal zone discovery from `/sys/class/thermal`
+- top current CPU-consuming processes sampled from `/proc/<pid>/stat`
 - top memory-consuming processes from `/proc/<pid>/status`
+- short CPU and memory activity history held in a fixed in-memory buffer
 - full-screen interactive terminal dashboard using ANSI escape sequences
 - terminal-size-aware layout via `ioctl(TIOCGWINSZ)`
 - alternate screen buffer so the previous shell screen is restored on exit
-- compact resource bars and semantic health colors
-- concise beginner-readable insight
+- semantic health colors and beginner-readable insight
 - automatic terminal cleanup on `Ctrl+C` / `SIGTERM`
-- compact fallback for terminals smaller than 80x24
+- compact fallback for smaller terminals
 - one-shot output for scripts and CI
 - `NO_COLOR` support and plain non-TTY output
 
-Per-process CPU ranking, localization, temperature, and multi-distro hardening are still pending.
+### Metric semantics
+
+RookieTop deliberately explains metrics that are easy to misread:
+
+- **Memory** uses `MemAvailable`; Linux filesystem cache is not treated as wasted RAM.
+- **Process CPU** is the process share of total machine CPU time during the sample window. A single process therefore cannot exceed 100% in RookieTop.
+- **Load average** is queue pressure relative to online CPUs. It includes runnable work and tasks waiting in uninterruptible sleep, so it is not another CPU percentage.
+- **Thermal** is optional because many VMs and some systems do not expose thermal zones through sysfs.
 
 See [`docs/SCOPE.md`](docs/SCOPE.md), [`docs/ROADMAP.md`](docs/ROADMAP.md), and [`docs/VM-TEST.md`](docs/VM-TEST.md).
 
@@ -78,4 +88,4 @@ make clean check
 
 ## Status
 
-The alpha is being validated on a real Linux VM. Alpha 3 focuses on making interactive monitoring feel like a proper full-screen terminal application without adding ncurses or another TUI dependency.
+Alpha 4 focuses on useful observability depth without changing the core model: one local binary, no daemon, no root, no ncurses, and no metrics framework.
