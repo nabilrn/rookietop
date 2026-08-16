@@ -46,8 +46,16 @@ Goal: establish the smallest reliable C project.
 - [x] guard PID reuse with process start time
 - [x] handle process churn without noisy errors
 - [x] explain that per-process CPU is total-machine share
+- [x] interactive all-process explorer
+- [x] process detail view with state, threads, RSS, and command line
+- [x] sort process explorer by memory, PID, or name
+- [x] confirmed SIGTERM action
+- [x] separately confirmed SIGKILL action
+- [x] verify process start time again immediately before signalling
+- [ ] process name search/filter
+- [ ] all-process CPU column and CPU sorting
 
-The CPU sampler uses short-lived allocation only to match PIDs across the sampling window; it does not keep a daemon-style process database.
+The CPU sampler uses short-lived allocation only to match PIDs across the sampling window; it does not keep a daemon-style process database. Process control never auto-escalates privileges or SIGTERM to SIGKILL.
 
 ## Phase 5 — Beginner dashboard
 
@@ -62,7 +70,9 @@ The CPU sampler uses short-lived allocation only to match PIDs across the sampli
 - [x] fixed-memory short CPU / memory activity history
 - [x] host, kernel, uptime, load, and optional thermal context
 - [x] non-TTY and `--once` one-shot fallback
-- [ ] optional interactive explanation/detail view
+- [x] raw keyboard input using termios/poll/read
+- [ ] dedicated visual redesign from a TUI mockup
+- [ ] optional interactive explanation / `? Why?` view
 
 ## Phase 6 — Localization
 
@@ -92,7 +102,6 @@ The CPU sampler uses short-lived allocation only to match PIDs across the sampli
 - metric persistence
 - Prometheus export
 - Docker/Kubernetes awareness
-- process termination controls
 - plugin system
 
 A deferred item moves into scope only with a concrete user requirement and a design showing why the simpler current approach is insufficient.
