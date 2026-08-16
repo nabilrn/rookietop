@@ -1,6 +1,6 @@
 # RookieTop Alpha VM Test
 
-This checklist qualifies `0.1.0-alpha.7` on a real Linux VM.
+This checklist qualifies `0.1.0-alpha.8` on a real Linux VM.
 
 ## 1. Record the environment
 
@@ -21,9 +21,9 @@ cd rookietop
 make clean check
 ```
 
-Expected: strict compilation and all collector, process, teaching, diagnosis, and signal-safety tests pass.
+Expected: strict compilation and all collector, process, search, teaching, diagnosis, and signal-safety tests pass.
 
-## 3. Overview copy and diagnosis
+## 3. Overview regression
 
 ```sh
 ./rookietop
@@ -31,13 +31,22 @@ Expected: strict compilation and all collector, process, teaching, diagnosis, an
 
 Check that:
 
-- the default screen uses plain language rather than teaching jargon
-- `WHAT ROOKIETOP NOTICES` contains one short headline and one evidence-based detail
-- a healthy machine says that nothing looks constrained rather than dumping technical definitions
-- `[?] Explain` is visible but technical detail is not forced into the default view
-- `p` still opens Process Explorer
+- the default screen still uses plain language
+- `WHAT ROOKIETOP NOTICES` contains one short evidence-based explanation
+- `[?] Explain` remains visible
+- `p` opens Process Explorer
+- resize and terminal restoration still work
 
-## 4. CPU context
+## 4. Process Explorer CPU column
+
+Press `p`.
+
+Expected:
+
+- the table contains PID, CPU, MEMORY, STATE, THR, and NAME
+- CPU values are percentages when sampling succeeds
+- the screen explains that process CPU is a share of whole-machine CPU during the latest short sample
+- a temporarily unavailable CPU sample displays `--` rather than breaking the process list
 
 In another shell:
 
@@ -46,64 +55,66 @@ yes > /dev/null &
 LOAD_PID=$!
 ```
 
-Watch the overview for several refreshes, then stop it:
+Press `c` to sort by CPU. `yes` should move near the top while it is busy. Stop it afterwards:
 
 ```sh
 kill "$LOAD_PID"
 ```
 
-Expected when CPU becomes high:
+On a multi-core machine, remember that RookieTop process CPU is whole-machine share. One saturated single thread may therefore be well below 100%.
 
-- RookieTop says the CPUs are busy
-- if one visible process clearly contributes enough CPU, its name appears in the explanation
-- wording says this is a short sample and does not claim a permanent root cause
-- pressing `?` opens the lesson browser with CPU preselected
+## 5. Sorting and stable selection
 
-## 5. Memory context
+Select a stable process with Up/Down, then press each sort key:
 
-Compare RookieTop with:
-
-```sh
-grep -E 'MemTotal|MemAvailable|MemFree|Cached' /proc/meminfo
+```text
+c  CPU
+m  memory
+p  PID
+n  name
 ```
 
-If memory pressure is naturally high, the explanation may name the largest visible memory user. It must not claim that one process explains all system memory use.
+Expected: the selected process remains the same process after sorting when it still exists. RookieTop tracks selection by PID + process start time instead of silently moving the action target to whatever row lands at the old index.
 
-Do not intentionally exhaust a small VM just to trigger the threshold.
+## 6. Process search
 
-## 6. Load context
+Press `/`.
 
-Compare:
+Check that the search screen clearly explains that a process name or PID can be entered.
 
-```sh
-cat /proc/loadavg
-nproc
-```
+Try:
+
+- part of a process name such as `ngin`, `maria`, or `cloud`
+- different capitalization such as `NGINX`
+- part of a PID
 
 Expected:
 
-- high load with low CPU is described as possibly involving I/O or other waiting work
-- high load with busy CPU is described as possible CPU queueing
-- RookieTop never presents load as another CPU percentage
+- search is case-insensitive for process names
+- PID substring search works
+- the Process Explorer header reports how many rows match
+- no-match results explain how to change or clear the search
+- pressing `/`, deleting the query, and pressing Enter restores all processes
+- Esc cancels editing without replacing the active filter
 
-## 7. Process Explorer copy
+## 7. Search + action safety
 
-Press `p`.
+With a filter active, select a disposable test process:
 
-Expected:
+```sh
+sleep 300 &
+TEST_PID=$!
+```
 
-- the header says to pick a process and see what it is doing
-- the selected area is called `ABOUT THIS PROCESS`, not `LEARN SELECTED`
-- state labels are readable (`Sleeping`, `Running`, `Waiting I/O`, etc.)
-- technical terms such as RSS and procfs internals are not required to understand the default list
-- the selected state gets one short plain-language explanation
-- `[?] Explain`, `[Enter] Details`, `[k] Stop safely`, and `[K] Force kill` are discoverable
+Search for the PID, inspect it, then use `k`.
+
+Expected: the same PID + process start-time safety guard applies from a filtered list. Search must not weaken signalling checks.
 
 ## 8. Process detail -> explanation progression
 
 Select a stable process and press Enter.
 
-The detail screen should show only useful basics first:
+The detail screen should show useful basics first:
 
 - PID
 - state
@@ -122,13 +133,7 @@ Only then should RookieTop expose deeper Linux details such as:
 - PID reuse and process start time
 - `VmRSS`
 
-Run the suggested command manually and compare the values:
-
-```sh
-cat /proc/<pid>/status
-```
-
-## 9. Safe Stop wording
+## 9. Safe Stop and Force Kill regression
 
 Create a disposable process:
 
@@ -137,40 +142,22 @@ sleep 300 &
 TEST_PID=$!
 ```
 
-Find it and press `k`.
+Find it and press `k`. Confirm that SIGTERM remains the safe default and that RookieTop never auto-escalates.
 
-Expected copy:
-
-- explains that RookieTop will ask the process to exit cleanly
-- explains that it gets a chance to finish work and clean up
-- shows `Linux signal: SIGTERM` as secondary technical context
-- confirms with wording similar to `Stop it` / `Keep running`
-
-Confirm and verify the process exits.
-
-## 10. Force Kill wording
-
-Use only a disposable process that ignores SIGTERM:
+For Force Kill, only use a disposable process that ignores SIGTERM:
 
 ```sh
 python3 -c 'import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(300)' &
 TEST_PID=$!
 ```
 
-Try Safe Stop first, then uppercase `K`.
+Try Safe Stop first, then uppercase `K`. SIGKILL must remain a separate explicit confirmation with no automatic sudo.
 
-Expected:
-
-- warning says the process ends immediately and cannot clean up first
-- `SIGKILL` is shown as the Linux signal
-- Force Kill remains a separate explicit confirmation
-- no automatic escalation and no automatic sudo occurs
-
-## 11. Lesson copy
+## 10. Teaching and diagnosis regression
 
 Press `?` from overview and open CPU, memory, and load.
 
-Each lesson should use this progression:
+Each lesson should still use:
 
 ```text
 ON YOUR MACHINE
@@ -180,9 +167,9 @@ HOW LINUX SHOWS IT
 TRY IT
 ```
 
-The lesson should sound conversational while still naming the real Linux source.
+Generate temporary CPU work and verify contextual diagnosis still names a visible contributor when the sample supports it.
 
-## 12. Regression checks
+## 11. Non-interactive regression
 
 Verify:
 
@@ -192,7 +179,7 @@ NO_COLOR=1 ./rookietop --once
 df -h /
 ```
 
-Also generate normal network traffic and confirm RX/TX still changes. Missing thermal zones must remain non-fatal.
+Generate normal network traffic and confirm RX/TX still changes. Missing thermal zones must remain non-fatal.
 
 ## Report back
 
@@ -200,12 +187,13 @@ Record:
 
 - distro and kernel
 - `make clean check` result
-- screenshot of the alpha.7 overview
-- screenshot of Process Explorer and `ABOUT THIS PROCESS`
-- screenshot of one `? Explain` process view
-- whether CPU diagnosis names the `yes` process when load is generated
-- whether the copy feels understandable before seeing Linux terminology
-- any layout overlap or clipped text
+- screenshot of alpha.8 Process Explorer
+- whether CPU sorting brings `yes` near the top
+- whether selection remains on the same PID when changing sort order
+- whether name and PID search both work
+- whether clearing search restores the full process list
+- whether filtered process actions still target the selected process safely
+- any layout overlap or confusing shortcut
 - any metric mismatch against `/proc`, `free -h`, or `df -h /`
 
 ## Known alpha limitations
@@ -216,6 +204,6 @@ Record:
 - network is aggregated across non-loopback interfaces
 - thermal depends on sysfs exposure and is often unavailable in VMs
 - contextual diagnosis uses short live samples and conservative heuristics; it is not a root-cause oracle
-- Process Explorer does not yet have name search/filter or an all-process CPU column
-- no guided-lab completion state
-- no final dedicated TUI mockup implementation yet
+- process CPU uses a short whole-machine-share sample and can legitimately read 0.0% for idle processes
+- no guided-lab completion state yet
+- no final beginner UX qualification across multiple distros yet

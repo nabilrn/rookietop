@@ -14,6 +14,7 @@ struct process_row {
     unsigned long threads;
     uint64_t rss_kib;
     uint64_t starttime;
+    double cpu_percent;
 };
 
 struct process_detail {

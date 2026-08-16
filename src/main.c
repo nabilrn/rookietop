@@ -9,9 +9,11 @@
 #include "process.h"
 #include "process_cpu.h"
 #include "process_list.h"
+#include "process_query.h"
 #include "teaching.h"
 #include "terminal_input.h"
 
+#include <ctype.h>
 #include <errno.h>
 #include <signal.h>
 #include <stdint.h>
@@ -22,7 +24,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define ROOKIETOP_VERSION "0.1.0-alpha.7"
+#define ROOKIETOP_VERSION "0.1.0-alpha.8"
 #define SAMPLE_NS 250000000L
 #define FRAME_WAIT_MS 700
 #define PROCESS_WAIT_MS 900
@@ -32,6 +34,7 @@
 #define BYTES_PER_MIB 1048576.0
 #define TOP_PROCESS_COUNT 8
 #define HISTORY_MAX 90
+#define PROCESS_SEARCH_MAX 64
 #define MIN_FULL_COLS 100
 #define MIN_FULL_ROWS 32
 
@@ -82,6 +85,7 @@ struct metric_history {
 enum app_screen {
     SCREEN_OVERVIEW,
     SCREEN_PROCESSES,
+    SCREEN_PROCESS_SEARCH,
     SCREEN_DETAIL,
     SCREEN_PROCESS_LEARN,
     SCREEN_LEARN_MENU,
@@ -92,6 +96,7 @@ enum app_screen {
 
 enum process_sort {
     SORT_MEMORY,
+    SORT_CPU,
     SORT_PID,
     SORT_NAME,
 };
@@ -108,6 +113,8 @@ struct app_state {
     struct process_detail selected_detail;
     struct overview view;
     int view_ok;
+    char search[PROCESS_SEARCH_MAX];
+    char search_draft[PROCESS_SEARCH_MAX];
     char notice[192];
 };
 
@@ -153,6 +160,8 @@ static void print_help(void)
     puts("  ? or l           Explain what you are looking at");
     puts("  p                Open Process Explorer");
     puts("  Up/Down          Move through a list");
+    puts("  /                Search processes by name or PID");
+    puts("  c/m/p/n          Sort processes by CPU/memory/PID/name");
     puts("  Enter            Open the selected item");
     puts("  k                Ask a process to stop cleanly");
     puts("  K                Force-kill after a separate warning");
@@ -728,6 +737,19 @@ static int compare_memory(const void *a, const void *b)
     return (left->pid > right->pid) - (left->pid < right->pid);
 }
 
+static int compare_cpu(const void *a, const void *b)
+{
+    const struct process_row *left = a;
+    const struct process_row *right = b;
+    if (left->cpu_percent < right->cpu_percent) {
+        return 1;
+    }
+    if (left->cpu_percent > right->cpu_percent) {
+        return -1;
+    }
+    return (left->pid > right->pid) - (left->pid < right->pid);
+}
+
 static int compare_pid(const void *a, const void *b)
 {
     const struct process_row *left = a;
@@ -745,6 +767,9 @@ static int compare_name(const void *a, const void *b)
 
 static const char *sort_name(enum process_sort sort)
 {
+    if (sort == SORT_CPU) {
+        return "CPU";
+    }
     if (sort == SORT_PID) {
         return "PID";
     }
@@ -759,13 +784,81 @@ static void sort_processes(struct process_row *rows, size_t count, enum process_
     if (count < 2) {
         return;
     }
-    if (sort == SORT_PID) {
+    if (sort == SORT_CPU) {
+        qsort(rows, count, sizeof(rows[0]), compare_cpu);
+    } else if (sort == SORT_PID) {
         qsort(rows, count, sizeof(rows[0]), compare_pid);
     } else if (sort == SORT_NAME) {
         qsort(rows, count, sizeof(rows[0]), compare_name);
     } else {
         qsort(rows, count, sizeof(rows[0]), compare_memory);
     }
+}
+
+static const struct process_cpu_info *find_cpu_info(const struct process_cpu_info *items,
+                                                    size_t count,
+                                                    int pid)
+{
+    size_t low = 0;
+    size_t high = count;
+    while (low < high) {
+        size_t mid = low + (high - low) / 2;
+        if (items[mid].pid == pid) {
+            return &items[mid];
+        }
+        if (items[mid].pid < pid) {
+            low = mid + 1;
+        } else {
+            high = mid;
+        }
+    }
+    return NULL;
+}
+
+static int sample_process_rows(struct process_row **out, size_t *out_count)
+{
+    if (out == NULL || out_count == NULL) {
+        return -1;
+    }
+
+    *out = NULL;
+    *out_count = 0;
+
+    struct cpu_sample cpu_prev;
+    struct cpu_sample cpu_curr;
+    struct process_cpu_snapshot *previous = NULL;
+    uint64_t system_delta_ticks = 0;
+    int cpu_sample_ok = 0;
+
+    if (cpu_read(&cpu_prev) == 0) {
+        previous = process_cpu_snapshot_take();
+    }
+    if (previous != NULL && wait_ns(SAMPLE_NS) == 0 && cpu_read(&cpu_curr) == 0 &&
+        cpu_total_delta(&cpu_prev, &cpu_curr, &system_delta_ticks) == 0) {
+        cpu_sample_ok = 1;
+    }
+
+    if (process_list_read(out, out_count) != 0) {
+        process_cpu_snapshot_free(previous);
+        return -1;
+    }
+
+    if (cpu_sample_ok) {
+        struct process_cpu_info *cpu_items = NULL;
+        size_t cpu_count = 0;
+        if (process_cpu_all_since(previous, system_delta_ticks, &cpu_items, &cpu_count) == 0) {
+            for (size_t i = 0; i < *out_count; i++) {
+                const struct process_cpu_info *info = find_cpu_info(cpu_items, cpu_count, (*out)[i].pid);
+                if (info != NULL && info->starttime == (*out)[i].starttime) {
+                    (*out)[i].cpu_percent = info->cpu_percent;
+                }
+            }
+            process_cpu_info_free(cpu_items);
+        }
+    }
+
+    process_cpu_snapshot_free(previous);
+    return 0;
 }
 
 static void align_selection(struct app_state *state, const struct process_row *rows, size_t count)
@@ -793,18 +886,28 @@ static void align_selection(struct app_state *state, const struct process_row *r
     state->selected_starttime = rows[state->selected].starttime;
 }
 
+static void format_process_cpu(double cpu_percent, char *out, size_t cap)
+{
+    if (cpu_percent < 0.0) {
+        (void)snprintf(out, cap, "--");
+    } else {
+        (void)snprintf(out, cap, "%.1f%%", cpu_percent);
+    }
+}
+
 static void render_processes(const struct process_row *rows,
                              size_t count,
+                             size_t total_count,
                              const struct app_state *state,
                              struct terminal_size term)
 {
     int left = 2;
     int width = term.cols - 3;
-    int table_row = 7;
+    int table_row = 8;
     int about_row = term.rows - 9;
     int footer_row = term.rows - 2;
     int visible = about_row - table_row - 1;
-    int name_width = term.cols - 45;
+    int name_width = term.cols - 55;
 
     if (visible < 4) {
         visible = 4;
@@ -812,8 +915,8 @@ static void render_processes(const struct process_row *rows,
     if (name_width < 12) {
         name_width = 12;
     }
-    if (name_width > 70) {
-        name_width = 70;
+    if (name_width > 65) {
+        name_width = 65;
     }
 
     size_t start = 0;
@@ -826,25 +929,36 @@ static void render_processes(const struct process_row *rows,
     printf("%sRookieTop%s  %sPROCESS EXPLORER%s",
            ansi(ANSI_BOLD), ansi(ANSI_RESET), ansi(ANSI_CYAN), ansi(ANSI_RESET));
     move_to(2, left);
-    printf("%sPick a process to see what it is doing and why it matters.%s",
-           ansi(ANSI_CYAN), ansi(ANSI_RESET));
+    printf("Pick a process. Enter opens details; ? explains what the values mean.");
     move_to(3, left);
-    printf("%s%zu readable processes | sorted by %s%s",
-           ansi(ANSI_DIM), count, sort_name(state->sort), ansi(ANSI_RESET));
+    if (state->search[0] != '\0') {
+        printf("%s%zu of %zu processes match \"%s\" | sorted by %s%s",
+               ansi(ANSI_DIM), count, total_count, state->search, sort_name(state->sort), ansi(ANSI_RESET));
+    } else {
+        printf("%s%zu readable processes | sorted by %s%s",
+               ansi(ANSI_DIM), total_count, sort_name(state->sort), ansi(ANSI_RESET));
+    }
     move_to(4, left);
+    printf("%s[/] Search   [c] CPU   [m] Memory   [p] PID   [n] Name%s",
+           ansi(ANSI_DIM), ansi(ANSI_RESET));
+    move_to(5, left);
     print_rule(width);
 
     move_to(table_row - 1, left);
-    printf("  %-8s %11s %13s %7s %-*s", "PID", "MEMORY", "STATE", "THREADS", name_width, "NAME");
+    printf("  %-8s %7s %11s %13s %5s %-*s",
+           "PID", "CPU", "MEMORY", "STATE", "THR", name_width, "NAME");
 
     int row = table_row;
     for (size_t i = start; i < count && row < about_row - 1; i++, row++) {
+        char cpu[16];
+        format_process_cpu(rows[i].cpu_percent, cpu, sizeof(cpu));
         move_to(row, left);
         const char *state_name = teaching_state_name(rows[i].state);
         if (i == state->selected) {
             fputs(ansi(ANSI_REVERSE), stdout);
-            printf("> %-8d %8.1f MiB %13.13s %7lu %-*.*s",
+            printf("> %-8d %7s %8.1f MiB %13.13s %5lu %-*.*s",
                    rows[i].pid,
+                   cpu,
                    (double)rows[i].rss_kib / KIB_PER_MIB,
                    state_name,
                    rows[i].threads,
@@ -853,8 +967,9 @@ static void render_processes(const struct process_row *rows,
                    rows[i].name);
             fputs(ansi(ANSI_RESET), stdout);
         } else {
-            printf("  %-8d %8.1f MiB %13.13s %7lu %-*.*s",
+            printf("  %-8d %7s %8.1f MiB %13.13s %5lu %-*.*s",
                    rows[i].pid,
+                   cpu,
                    (double)rows[i].rss_kib / KIB_PER_MIB,
                    state_name,
                    rows[i].threads,
@@ -864,25 +979,36 @@ static void render_processes(const struct process_row *rows,
         }
     }
 
+    if (count == 0) {
+        move_to(table_row, left);
+        if (state->search[0] != '\0') {
+            printf("No process matches \"%s\". Press / to change or clear the search.", state->search);
+        } else {
+            printf("No readable processes in this sample.");
+        }
+    }
+
     move_to(about_row, left);
     print_rule(width);
     move_to(about_row + 1, left);
     printf("%sABOUT THIS PROCESS%s", ansi(ANSI_CYAN), ansi(ANSI_RESET));
     if (count > 0) {
         const struct process_row *selected = &rows[state->selected];
+        char cpu[16];
+        format_process_cpu(selected->cpu_percent, cpu, sizeof(cpu));
         move_to(about_row + 2, left);
-        printf("%s  PID %d  |  %s  |  %.1f MiB  |  %lu thread%s",
+        printf("%s  PID %d  |  CPU %s  |  %.1f MiB  |  %s  |  %lu thread%s",
                selected->name,
                selected->pid,
-               teaching_state_name(selected->state),
+               cpu,
                (double)selected->rss_kib / KIB_PER_MIB,
+               teaching_state_name(selected->state),
                selected->threads,
                selected->threads == 1 ? "" : "s");
         move_to(about_row + 3, left);
         printf("%s", teaching_state_explanation(selected->state));
         move_to(about_row + 4, left);
-        printf("Curious how Linux sees this process? Press %s?%s to explain it.",
-               ansi(ANSI_BOLD), ansi(ANSI_RESET));
+        printf("CPU is this process's share of the whole machine during the latest short sample.");
     }
 
     if (state->notice[0] != '\0') {
@@ -895,14 +1021,41 @@ static void render_processes(const struct process_row *rows,
     move_to(footer_row + 1, left);
     print_key("Up/Down", "Move", ANSI_CYAN);
     printf("  ");
+    print_key("/", "Search", ANSI_CYAN);
+    printf("  ");
     print_key("Enter", "Details", ANSI_GREEN);
     printf("  ");
     print_key("?", "Explain", ANSI_CYAN);
     printf("  ");
-    print_key("k", "Stop safely", ANSI_GREEN);
-    printf("  ");
-    print_key("K", "Force kill", ANSI_RED);
-    printf("  %s[m] Memory  [p] PID  [n] Name  [Esc] Back  [q] Quit%s", ansi(ANSI_DIM), ansi(ANSI_RESET));
+    print_key("k", "Stop", ANSI_GREEN);
+    printf("  %s[Esc] Back  [q] Quit%s", ansi(ANSI_DIM), ansi(ANSI_RESET));
+}
+
+static void render_process_search(const struct app_state *state, struct terminal_size term)
+{
+    int left = 4;
+    int width = term.cols - 7;
+    int footer = term.rows - 2;
+
+    fputs("\033[H\033[J", stdout);
+    move_to(1, left);
+    printf("%sSEARCH PROCESSES%s", ansi(ANSI_CYAN), ansi(ANSI_RESET));
+    move_to(2, left);
+    printf("Type part of a process name or PID. Search is case-insensitive.");
+    move_to(3, left);
+    print_rule(width);
+    move_to(6, left);
+    printf("Search: %s%s_%s", ansi(ANSI_BOLD), state->search_draft, ansi(ANSI_RESET));
+    move_to(9, left);
+    printf("Examples: nginx   maria   cloud   1425");
+    move_to(11, left);
+    printf("Leave the search empty and press Enter to show every process again.");
+
+    move_to(footer, left);
+    print_rule(width);
+    move_to(footer + 1, left);
+    print_key("Enter", "Apply", ANSI_GREEN);
+    printf("   %s[Backspace] Delete   [Esc] Cancel%s", ansi(ANSI_DIM), ansi(ANSI_RESET));
 }
 
 static void render_process_detail(const struct process_detail *detail, struct terminal_size term)
@@ -1317,6 +1470,38 @@ static void prepare_learn_from_view(struct app_state *state)
     state->screen = SCREEN_LEARN_MENU;
 }
 
+static void begin_process_search(struct app_state *state)
+{
+    (void)snprintf(state->search_draft, sizeof(state->search_draft), "%s", state->search);
+    state->screen = SCREEN_PROCESS_SEARCH;
+}
+
+static void apply_process_search(struct app_state *state)
+{
+    (void)snprintf(state->search, sizeof(state->search), "%s", state->search_draft);
+    state->selected = 0;
+    state->selected_pid = 0;
+    state->selected_starttime = 0;
+    state->notice[0] = '\0';
+    state->screen = SCREEN_PROCESSES;
+}
+
+static void edit_process_search(struct app_state *state, int key)
+{
+    size_t len = strlen(state->search_draft);
+    if (key == 8 || key == 127) {
+        if (len > 0) {
+            state->search_draft[len - 1] = '\0';
+        }
+        return;
+    }
+    if (key >= 0 && key <= 255 && isprint((unsigned char)key) &&
+        len + 1 < sizeof(state->search_draft)) {
+        state->search_draft[len] = (char)key;
+        state->search_draft[len + 1] = '\0';
+    }
+}
+
 static int run_interactive(void)
 {
     struct app_state state;
@@ -1344,6 +1529,7 @@ static int run_interactive(void)
 
     while (!stop_requested) {
         int key = INPUT_NONE;
+        enum app_screen screen_before = state.screen;
         struct terminal_size term = terminal_size();
 
         if (state.screen == SCREEN_OVERVIEW) {
@@ -1367,14 +1553,15 @@ static int run_interactive(void)
             }
         } else if (state.screen == SCREEN_PROCESSES) {
             struct process_row *rows = NULL;
-            size_t count = 0;
-            if (process_list_read(&rows, &count) != 0) {
+            size_t total_count = 0;
+            if (sample_process_rows(&rows, &total_count) != 0) {
                 set_notice(&state, "RookieTop could not read the process list.");
-                count = 0;
+                total_count = 0;
             }
+            size_t count = process_query_filter(rows, total_count, state.search);
             sort_processes(rows, count, state.sort);
             align_selection(&state, rows, count);
-            render_processes(rows, count, &state, term);
+            render_processes(rows, count, total_count, &state, term);
             fflush(stdout);
             key = terminal_input_read_key(PROCESS_WAIT_MS);
 
@@ -1398,18 +1585,16 @@ static int run_interactive(void)
                 open_selected_detail(&state, &rows[state.selected], SCREEN_CONFIRM_TERM);
             } else if (key == 'K' && count > 0) {
                 open_selected_detail(&state, &rows[state.selected], SCREEN_CONFIRM_KILL);
+            } else if (key == '/') {
+                begin_process_search(&state);
+            } else if (key == 'c') {
+                state.sort = SORT_CPU;
             } else if (key == 'm') {
                 state.sort = SORT_MEMORY;
-                state.selected_pid = 0;
-                state.selected = 0;
             } else if (key == 'p') {
                 state.sort = SORT_PID;
-                state.selected_pid = 0;
-                state.selected = 0;
             } else if (key == 'n') {
                 state.sort = SORT_NAME;
-                state.selected_pid = 0;
-                state.selected = 0;
             } else if (key == 'l' || key == 'L') {
                 state.return_screen = SCREEN_PROCESSES;
                 state.screen = SCREEN_LEARN_MENU;
@@ -1417,6 +1602,17 @@ static int run_interactive(void)
                 state.screen = SCREEN_OVERVIEW;
             }
             process_list_free(rows);
+        } else if (state.screen == SCREEN_PROCESS_SEARCH) {
+            render_process_search(&state, term);
+            fflush(stdout);
+            key = terminal_input_read_key(-1);
+            if (key == INPUT_ENTER) {
+                apply_process_search(&state);
+            } else if (key == INPUT_ESCAPE) {
+                state.screen = SCREEN_PROCESSES;
+            } else {
+                edit_process_search(&state, key);
+            }
         } else if (state.screen == SCREEN_DETAIL) {
             if (refresh_selected_detail(&state) != 0) {
                 set_notice(&state, "The process exited or that PID was reused.");
@@ -1498,7 +1694,7 @@ static int run_interactive(void)
         if (key < 0) {
             return 1;
         }
-        if (key == 'q' || key == 'Q') {
+        if (screen_before != SCREEN_PROCESS_SEARCH && (key == 'q' || key == 'Q')) {
             break;
         }
     }
