@@ -26,7 +26,8 @@ int main(void)
     }
 
     if (strcmp(teaching_state_name('S'), "Sleeping") != 0 ||
-        strstr(teaching_state_explanation('S'), "usually healthy") == NULL ||
+        strstr(teaching_state_explanation('S'), "Waiting") == NULL ||
+        strcmp(teaching_state_name('R'), "Running") != 0 ||
         strcmp(teaching_state_name('Z'), "Zombie") != 0) {
         return EXIT_FAILURE;
     }
