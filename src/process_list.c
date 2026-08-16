@@ -136,7 +136,7 @@ static int read_row(int pid, struct process_row *out)
         return -1;
     }
 
-    struct process_row row = {.pid = pid, .state = '?'};
+    struct process_row row = {.pid = pid, .state = '?', .cpu_percent = -1.0};
     char line[LINE_MAX_LOCAL];
     int found_name = 0;
 
