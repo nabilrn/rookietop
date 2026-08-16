@@ -1,5 +1,6 @@
 rookietop
 tests/test_cpu
+tests/test_memory
 build/
 *.o
 *.d

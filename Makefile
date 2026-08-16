@@ -5,9 +5,11 @@ LDFLAGS ?=
 LDLIBS ?=
 
 TARGET := rookietop
-SRC := src/main.c src/cpu.c
-TEST_TARGET := tests/test_cpu
-TEST_SRC := tests/test_cpu.c src/cpu.c
+SRC := src/main.c src/cpu.c src/memory.c
+CPU_TEST := tests/test_cpu
+CPU_TEST_SRC := tests/test_cpu.c src/cpu.c
+MEMORY_TEST := tests/test_memory
+MEMORY_TEST_SRC := tests/test_memory.c src/memory.c
 
 .PHONY: all clean check debug test
 
@@ -16,17 +18,23 @@ all: $(TARGET)
 $(TARGET): $(SRC)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(SRC) $(LDFLAGS) $(LDLIBS) -o $@
 
-$(TEST_TARGET): $(TEST_SRC)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(TEST_SRC) $(LDFLAGS) -lm -o $@
+$(CPU_TEST): $(CPU_TEST_SRC)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(CPU_TEST_SRC) $(LDFLAGS) -lm -o $@
 
-test: $(TEST_TARGET)
-	./$(TEST_TARGET)
+$(MEMORY_TEST): $(MEMORY_TEST_SRC)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(MEMORY_TEST_SRC) $(LDFLAGS) -lm -o $@
+
+test: $(CPU_TEST) $(MEMORY_TEST)
+	./$(CPU_TEST)
+	./$(MEMORY_TEST)
 
 debug:
 	$(CC) $(CPPFLAGS) -std=c11 -O0 -g3 -Wall -Wextra -Wpedantic -Werror \
 		-fsanitize=address,undefined $(SRC) -fsanitize=address,undefined -o $(TARGET)
 	$(CC) $(CPPFLAGS) -std=c11 -O0 -g3 -Wall -Wextra -Wpedantic -Werror \
-		-fsanitize=address,undefined $(TEST_SRC) -fsanitize=address,undefined -lm -o $(TEST_TARGET)
+		-fsanitize=address,undefined $(CPU_TEST_SRC) -fsanitize=address,undefined -lm -o $(CPU_TEST)
+	$(CC) $(CPPFLAGS) -std=c11 -O0 -g3 -Wall -Wextra -Wpedantic -Werror \
+		-fsanitize=address,undefined $(MEMORY_TEST_SRC) -fsanitize=address,undefined -lm -o $(MEMORY_TEST)
 
 check: $(TARGET) test
 	./$(TARGET) --help >/dev/null
@@ -34,4 +42,4 @@ check: $(TARGET) test
 	./$(TARGET) >/dev/null
 
 clean:
-	rm -f $(TARGET) $(TEST_TARGET)
+	rm -f $(TARGET) $(CPU_TEST) $(MEMORY_TEST)
