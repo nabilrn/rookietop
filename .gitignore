@@ -3,6 +3,7 @@ tests/test_cpu
 tests/test_memory
 tests/test_disk
 tests/test_network
+tests/test_process
 build/
 *.o
 *.d
