@@ -53,10 +53,11 @@ Goal: establish the smallest reliable C project.
 - [x] separately confirmed Force Kill with SIGKILL
 - [x] verify process start time immediately before signalling
 - [x] explain SIGTERM vs SIGKILL before an action
-- [ ] process name search/filter
-- [ ] all-process CPU column and CPU sorting
+- [x] process name/PID search and filter
+- [x] all-process CPU column and CPU sorting
+- [x] preserve selected process across sort/refresh using PID + start time
 
-The CPU sampler uses short-lived allocation only to match PIDs across the sampling window; it does not keep a daemon-style process database. Process control never auto-escalates privileges or SIGTERM to SIGKILL.
+The CPU sampler uses short-lived allocation only to match PIDs across the sampling window; it does not keep a daemon-style process database. Process control never auto-escalates privileges or SIGTERM to SIGKILL. Process search is an in-memory substring filter and does not shell out to another command.
 
 ## Phase 5 — Beginner dashboard
 
@@ -73,7 +74,7 @@ The CPU sampler uses short-lived allocation only to match PIDs across the sampli
 - [x] non-TTY and `--once` one-shot fallback
 - [x] raw keyboard input using termios/poll/read
 - [x] progressive-disclosure copy pass: plain language before Linux internals
-- [ ] dedicated visual redesign from a TUI mockup
+- [ ] final UX pass from real beginner testing
 
 ## Phase 5.5 — Teaching Engine
 
@@ -98,7 +99,7 @@ Goal: make RookieTop a Linux learning environment, not merely a monitor with exp
 - [x] distinguish high load with low CPU from likely CPU queueing
 - [x] preselect the most relevant lesson from current system evidence
 - [x] deterministic contextual-diagnosis tests and sanitizer coverage
-- [ ] optional guided mini-labs with completion state
+- [ ] guided mini-labs that observe whether the experiment changed the real system
 
 Teaching and diagnosis must not duplicate collector logic. They consume normalized live data, explain the evidence conservatively, and expose the Linux source only when the user asks to go deeper.
 
@@ -110,7 +111,7 @@ Teaching and diagnosis must not duplicate collector logic. They consume normaliz
 - [ ] English fallback for unknown/missing locale
 - [ ] prevent collector/diagnosis duplication by language
 
-## Phase 7 — v0.1 hardening
+## Phase 7 — Stable hardening
 
 - [ ] test Ubuntu/Debian family
 - [ ] test Fedora/RHEL family
@@ -118,7 +119,8 @@ Teaching and diagnosis must not duplicate collector logic. They consume normaliz
 - [ ] test missing/partial sysfs features
 - [ ] measure idle CPU and RSS
 - [ ] document supported Linux assumptions
-- [ ] release tested Linux binaries
+- [ ] qualify common terminal sizes and SSH use
+- [ ] release tested x86_64 and arm64 Linux binaries
 
 ## Deferred until justified
 
