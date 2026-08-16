@@ -33,6 +33,9 @@ jobs:
           ./tests/test_disk
           ./tests/test_network
           ./tests/test_process
+          ./tests/test_process_cpu
+          ./tests/test_process_list
+          ./tests/test_host
           ./rookietop --help >/dev/null
           ./rookietop --version >/dev/null
           ./rookietop --once >/dev/null
