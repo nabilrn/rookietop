@@ -56,4 +56,4 @@ make check
 
 ## Status
 
-Phase 1 is implemented: RookieTop reads aggregate CPU counters directly from `/proc/stat`, derives usage from two samples, and explains the result in beginner-friendly terms. Memory is the next scoped collector.
+Phases 1 and 2 are implemented. RookieTop reads CPU accounting from `/proc/stat` and memory state from `/proc/meminfo`, using `MemAvailable` so Linux filesystem cache is not mistaken for wasted memory. Disk and network are next.
