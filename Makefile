@@ -5,7 +5,7 @@ LDFLAGS ?=
 LDLIBS ?=
 
 TARGET := rookietop
-SRC := src/main.c src/cpu.c src/memory.c src/disk.c src/network.c src/process.c src/process_cpu.c src/process_list.c src/teaching.c src/diagnosis.c src/terminal_input.c src/host.c
+SRC := src/main.c src/cpu.c src/memory.c src/disk.c src/network.c src/process.c src/process_cpu.c src/process_list.c src/process_query.c src/teaching.c src/diagnosis.c src/terminal_input.c src/host.c
 CPU_TEST := tests/test_cpu
 CPU_TEST_SRC := tests/test_cpu.c src/cpu.c
 MEMORY_TEST := tests/test_memory
@@ -20,6 +20,8 @@ PROCESS_CPU_TEST := tests/test_process_cpu
 PROCESS_CPU_TEST_SRC := tests/test_process_cpu.c src/process_cpu.c
 PROCESS_LIST_TEST := tests/test_process_list
 PROCESS_LIST_TEST_SRC := tests/test_process_list.c src/process_list.c src/process_cpu.c
+PROCESS_QUERY_TEST := tests/test_process_query
+PROCESS_QUERY_TEST_SRC := tests/test_process_query.c src/process_query.c
 TEACHING_TEST := tests/test_teaching
 TEACHING_TEST_SRC := tests/test_teaching.c src/teaching.c
 DIAGNOSIS_TEST := tests/test_diagnosis
@@ -55,6 +57,9 @@ $(PROCESS_CPU_TEST): $(PROCESS_CPU_TEST_SRC)
 $(PROCESS_LIST_TEST): $(PROCESS_LIST_TEST_SRC)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(PROCESS_LIST_TEST_SRC) $(LDFLAGS) -o $@
 
+$(PROCESS_QUERY_TEST): $(PROCESS_QUERY_TEST_SRC)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(PROCESS_QUERY_TEST_SRC) $(LDFLAGS) -o $@
+
 $(TEACHING_TEST): $(TEACHING_TEST_SRC)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(TEACHING_TEST_SRC) $(LDFLAGS) -o $@
 
@@ -64,7 +69,7 @@ $(DIAGNOSIS_TEST): $(DIAGNOSIS_TEST_SRC)
 $(HOST_TEST): $(HOST_TEST_SRC)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_TEST_SRC) $(LDFLAGS) -lm -o $@
 
-test: $(CPU_TEST) $(MEMORY_TEST) $(DISK_TEST) $(NETWORK_TEST) $(PROCESS_TEST) $(PROCESS_CPU_TEST) $(PROCESS_LIST_TEST) $(TEACHING_TEST) $(DIAGNOSIS_TEST) $(HOST_TEST)
+test: $(CPU_TEST) $(MEMORY_TEST) $(DISK_TEST) $(NETWORK_TEST) $(PROCESS_TEST) $(PROCESS_CPU_TEST) $(PROCESS_LIST_TEST) $(PROCESS_QUERY_TEST) $(TEACHING_TEST) $(DIAGNOSIS_TEST) $(HOST_TEST)
 	./$(CPU_TEST)
 	./$(MEMORY_TEST)
 	./$(DISK_TEST)
@@ -72,6 +77,7 @@ test: $(CPU_TEST) $(MEMORY_TEST) $(DISK_TEST) $(NETWORK_TEST) $(PROCESS_TEST) $(
 	./$(PROCESS_TEST)
 	./$(PROCESS_CPU_TEST)
 	./$(PROCESS_LIST_TEST)
+	./$(PROCESS_QUERY_TEST)
 	./$(TEACHING_TEST)
 	./$(DIAGNOSIS_TEST)
 	./$(HOST_TEST)
@@ -94,6 +100,8 @@ debug:
 	$(CC) $(CPPFLAGS) -std=c11 -O0 -g3 -Wall -Wextra -Wpedantic -Werror \
 		-fsanitize=address,undefined $(PROCESS_LIST_TEST_SRC) -fsanitize=address,undefined -o $(PROCESS_LIST_TEST)
 	$(CC) $(CPPFLAGS) -std=c11 -O0 -g3 -Wall -Wextra -Wpedantic -Werror \
+		-fsanitize=address,undefined $(PROCESS_QUERY_TEST_SRC) -fsanitize=address,undefined -o $(PROCESS_QUERY_TEST)
+	$(CC) $(CPPFLAGS) -std=c11 -O0 -g3 -Wall -Wextra -Wpedantic -Werror \
 		-fsanitize=address,undefined $(TEACHING_TEST_SRC) -fsanitize=address,undefined -o $(TEACHING_TEST)
 	$(CC) $(CPPFLAGS) -std=c11 -O0 -g3 -Wall -Wextra -Wpedantic -Werror \
 		-fsanitize=address,undefined $(DIAGNOSIS_TEST_SRC) -fsanitize=address,undefined -o $(DIAGNOSIS_TEST)
@@ -106,4 +114,4 @@ check: $(TARGET) test
 	./$(TARGET) --once >/dev/null
 
 clean:
-	rm -f $(TARGET) $(CPU_TEST) $(MEMORY_TEST) $(DISK_TEST) $(NETWORK_TEST) $(PROCESS_TEST) $(PROCESS_CPU_TEST) $(PROCESS_LIST_TEST) $(TEACHING_TEST) $(DIAGNOSIS_TEST) $(HOST_TEST)
+	rm -f $(TARGET) $(CPU_TEST) $(MEMORY_TEST) $(DISK_TEST) $(NETWORK_TEST) $(PROCESS_TEST) $(PROCESS_CPU_TEST) $(PROCESS_LIST_TEST) $(PROCESS_QUERY_TEST) $(TEACHING_TEST) $(DIAGNOSIS_TEST) $(HOST_TEST)
