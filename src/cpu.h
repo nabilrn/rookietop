@@ -16,6 +16,9 @@ struct cpu_sample {
 
 int cpu_parse_line(const char *line, struct cpu_sample *out);
 int cpu_read(struct cpu_sample *out);
+int cpu_total_delta(const struct cpu_sample *prev,
+                    const struct cpu_sample *curr,
+                    uint64_t *out_total);
 int cpu_usage(const struct cpu_sample *prev,
               const struct cpu_sample *curr,
               double *out_percent);

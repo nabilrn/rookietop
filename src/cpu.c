@@ -66,14 +66,11 @@ static int delta(uint64_t prev, uint64_t curr, uint64_t *out)
     return 0;
 }
 
-int cpu_usage(const struct cpu_sample *prev,
-              const struct cpu_sample *curr,
-              double *out_percent)
+static int cpu_deltas(const struct cpu_sample *prev,
+                      const struct cpu_sample *curr,
+                      uint64_t *active,
+                      uint64_t *inactive)
 {
-    if (prev == NULL || curr == NULL || out_percent == NULL) {
-        return -1;
-    }
-
     uint64_t user;
     uint64_t nice;
     uint64_t system;
@@ -83,7 +80,8 @@ int cpu_usage(const struct cpu_sample *prev,
     uint64_t softirq;
     uint64_t steal;
 
-    if (delta(prev->user, curr->user, &user) != 0 ||
+    if (prev == NULL || curr == NULL || active == NULL || inactive == NULL ||
+        delta(prev->user, curr->user, &user) != 0 ||
         delta(prev->nice, curr->nice, &nice) != 0 ||
         delta(prev->system, curr->system, &system) != 0 ||
         delta(prev->idle, curr->idle, &idle) != 0 ||
@@ -94,10 +92,49 @@ int cpu_usage(const struct cpu_sample *prev,
         return -1;
     }
 
-    uint64_t active = user + nice + system + irq + softirq + steal;
-    uint64_t inactive = idle + iowait;
-    uint64_t total = active + inactive;
+    *active = user + nice + system + irq + softirq + steal;
+    *inactive = idle + iowait;
+    return 0;
+}
 
+int cpu_total_delta(const struct cpu_sample *prev,
+                    const struct cpu_sample *curr,
+                    uint64_t *out_total)
+{
+    if (out_total == NULL) {
+        return -1;
+    }
+
+    uint64_t active;
+    uint64_t inactive;
+    if (cpu_deltas(prev, curr, &active, &inactive) != 0) {
+        return -1;
+    }
+
+    uint64_t total = active + inactive;
+    if (total == 0) {
+        return -1;
+    }
+
+    *out_total = total;
+    return 0;
+}
+
+int cpu_usage(const struct cpu_sample *prev,
+              const struct cpu_sample *curr,
+              double *out_percent)
+{
+    if (out_percent == NULL) {
+        return -1;
+    }
+
+    uint64_t active;
+    uint64_t inactive;
+    if (cpu_deltas(prev, curr, &active, &inactive) != 0) {
+        return -1;
+    }
+
+    uint64_t total = active + inactive;
     if (total == 0) {
         return -1;
     }

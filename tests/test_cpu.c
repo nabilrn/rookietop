@@ -72,9 +72,12 @@ static int test_usage(void)
     struct cpu_sample prev = {.user = 100, .system = 50, .idle = 850};
     struct cpu_sample curr = {.user = 160, .system = 70, .idle = 870};
     double usage;
+    uint64_t total;
 
     CHECK(cpu_usage(&prev, &curr, &usage) == 0);
     CHECK(fabs(usage - 80.0) < 0.0001);
+    CHECK(cpu_total_delta(&prev, &curr, &total) == 0);
+    CHECK(total == 100);
     return 0;
 }
 
@@ -93,8 +96,10 @@ static int test_usage_rejects_zero_delta(void)
 {
     struct cpu_sample sample = {.user = 1, .idle = 1};
     double usage;
+    uint64_t total;
 
     CHECK(cpu_usage(&sample, &sample, &usage) != 0);
+    CHECK(cpu_total_delta(&sample, &sample, &total) != 0);
     return 0;
 }
 
@@ -103,8 +108,10 @@ static int test_usage_rejects_counter_regression(void)
     struct cpu_sample prev = {.user = 10, .idle = 20};
     struct cpu_sample curr = {.user = 9, .idle = 21};
     double usage;
+    uint64_t total;
 
     CHECK(cpu_usage(&prev, &curr, &usage) != 0);
+    CHECK(cpu_total_delta(&prev, &curr, &total) != 0);
     return 0;
 }
 
