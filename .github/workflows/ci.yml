@@ -25,7 +25,16 @@ jobs:
 
       - name: Runtime stress smoke
         if: matrix.cc == 'gcc'
-        run: ROOKIETOP_STRESS_SECONDS=12 make stress
+        run: ROOKIETOP_STRESS_SECONDS=12 make stress | tee stress-summary.txt
+
+      - name: Upload runtime stress summary
+        if: always() && matrix.cc == 'gcc'
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-stress-${{ github.sha }}
+          path: stress-summary.txt
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Sanitizer build and test
         if: matrix.cc == 'gcc'
