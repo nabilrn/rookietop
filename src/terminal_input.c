@@ -36,33 +36,24 @@ void terminal_input_restore(struct terminal_input *input)
 
 static int read_byte(unsigned char *out)
 {
-    for (;;) {
-        ssize_t count = read(STDIN_FILENO, out, 1);
-        if (count == 1) {
-            return 1;
-        }
-        if (count == 0) {
-            return 0;
-        }
-        if (errno != EINTR) {
-            return -1;
-        }
+    ssize_t count = read(STDIN_FILENO, out, 1);
+    if (count == 1) {
+        return 1;
     }
+    if (count == 0 || errno == EINTR) {
+        return 0;
+    }
+    return -1;
 }
 
 static int wait_input(int timeout_ms)
 {
     struct pollfd fd = {.fd = STDIN_FILENO, .events = POLLIN, .revents = 0};
-
-    for (;;) {
-        int result = poll(&fd, 1, timeout_ms);
-        if (result >= 0) {
-            return result;
-        }
-        if (errno != EINTR) {
-            return -1;
-        }
+    int result = poll(&fd, 1, timeout_ms);
+    if (result >= 0) {
+        return result;
     }
+    return errno == EINTR ? 0 : -1;
 }
 
 int terminal_input_read_key(int timeout_ms)
