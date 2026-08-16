@@ -42,11 +42,12 @@ Goal: establish the smallest reliable C project.
 - [x] enumerate numeric `/proc/<pid>` entries
 - [x] parse only fields RookieTop displays
 - [x] rank top memory consumers with a fixed-size list
-- [ ] sample and rank top CPU consumers
+- [x] sample and rank current CPU consumers from `/proc/<pid>/stat`
+- [x] guard PID reuse with process start time
 - [x] handle process churn without noisy errors
-- [x] show the process data source in the dashboard
+- [x] explain that per-process CPU is total-machine share
 
-Phase 4 remains intentionally partial until VM testing shows that per-process CPU ranking justifies the extra sampling state.
+The CPU sampler uses short-lived allocation only to match PIDs across the sampling window; it does not keep a daemon-style process database.
 
 ## Phase 5 — Beginner dashboard
 
@@ -55,13 +56,13 @@ Phase 4 remains intentionally partial until VM testing shows that per-process CP
 - [x] concise primary insight
 - [x] compact CPU / memory / disk resource bars
 - [x] semantic terminal colors with `NO_COLOR` fallback
-- [x] ANSI terminal refresh with no TUI framework
-- [x] lower-flicker cursor-home refresh instead of full clearing each frame
-- [x] hide and restore the terminal cursor during live mode
+- [x] full-screen alternate-buffer live mode without a TUI framework
+- [x] terminal-size-aware responsive layout
+- [x] top CPU and top memory panels
+- [x] fixed-memory short CPU / memory activity history
+- [x] host, kernel, uptime, load, and optional thermal context
 - [x] non-TTY and `--once` one-shot fallback
 - [ ] optional interactive explanation/detail view
-
-Alpha 2 focuses on making the monitor readable before adding more collectors.
 
 ## Phase 6 — Localization
 
