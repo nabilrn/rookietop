@@ -171,6 +171,13 @@ static int compare_counter(const void *a, const void *b)
     return (left->pid > right->pid) - (left->pid < right->pid);
 }
 
+static int compare_info_pid(const void *a, const void *b)
+{
+    const struct process_cpu_info *left = a;
+    const struct process_cpu_info *right = b;
+    return (left->pid > right->pid) - (left->pid < right->pid);
+}
+
 struct process_cpu_snapshot *process_cpu_snapshot_take(void)
 {
     DIR *dir = opendir(PROC_ROOT);
@@ -276,6 +283,108 @@ static const struct process_cpu_counter *find_previous(const struct process_cpu_
     return NULL;
 }
 
+int process_cpu_all_since(const struct process_cpu_snapshot *previous,
+                          uint64_t system_delta_ticks,
+                          struct process_cpu_info **out,
+                          size_t *out_count)
+{
+    if (previous == NULL || system_delta_ticks == 0 || out == NULL || out_count == NULL) {
+        return -1;
+    }
+
+    *out = NULL;
+    *out_count = 0;
+
+    DIR *dir = opendir(PROC_ROOT);
+    if (dir == NULL) {
+        return -1;
+    }
+
+    size_t capacity = INITIAL_CAPACITY;
+    struct process_cpu_info *items = malloc(capacity * sizeof(items[0]));
+    if (items == NULL) {
+        closedir(dir);
+        return -1;
+    }
+
+    size_t count = 0;
+    for (;;) {
+        errno = 0;
+        struct dirent *entry = readdir(dir);
+        if (entry == NULL) {
+            if (errno != 0) {
+                free(items);
+                closedir(dir);
+                return -1;
+            }
+            break;
+        }
+
+        int pid;
+        if (parse_pid(entry->d_name, &pid) != 0) {
+            continue;
+        }
+
+        struct process_cpu_stat current;
+        if (read_process_stat(pid, &current) != 0) {
+            continue;
+        }
+
+        if (count == capacity) {
+            if (capacity > SIZE_MAX / 2 / sizeof(items[0])) {
+                free(items);
+                closedir(dir);
+                return -1;
+            }
+            capacity *= 2;
+            void *grown = realloc(items, capacity * sizeof(items[0]));
+            if (grown == NULL) {
+                free(items);
+                closedir(dir);
+                return -1;
+            }
+            items = grown;
+        }
+
+        struct process_cpu_info info = {
+            .pid = current.pid,
+            .cpu_percent = 0.0,
+            .starttime = current.starttime,
+        };
+        memcpy(info.name, current.name, sizeof(info.name));
+        info.name[sizeof(info.name) - 1] = '\0';
+
+        const struct process_cpu_counter *old = find_previous(previous, pid);
+        if (old != NULL && old->starttime == current.starttime && current.ticks >= old->ticks) {
+            uint64_t delta_ticks = current.ticks - old->ticks;
+            info.cpu_percent = (double)delta_ticks * 100.0 / (double)system_delta_ticks;
+        }
+
+        items[count++] = info;
+    }
+
+    if (closedir(dir) != 0) {
+        free(items);
+        return -1;
+    }
+
+    if (count == 0) {
+        free(items);
+        items = NULL;
+    } else {
+        qsort(items, count, sizeof(items[0]), compare_info_pid);
+    }
+
+    *out = items;
+    *out_count = count;
+    return 0;
+}
+
+void process_cpu_info_free(struct process_cpu_info *items)
+{
+    free(items);
+}
+
 static void insert_top(struct process_cpu_info *out,
                        size_t cap,
                        size_t *count,
@@ -309,59 +418,20 @@ int process_cpu_top_since(const struct process_cpu_snapshot *previous,
         return -1;
     }
 
-    DIR *dir = opendir(PROC_ROOT);
-    if (dir == NULL) {
+    struct process_cpu_info *all = NULL;
+    size_t total = 0;
+    if (process_cpu_all_since(previous, system_delta_ticks, &all, &total) != 0) {
         return -1;
     }
 
     size_t count = 0;
-    size_t total = 0;
-
-    for (;;) {
-        errno = 0;
-        struct dirent *entry = readdir(dir);
-        if (entry == NULL) {
-            if (errno != 0) {
-                closedir(dir);
-                return -1;
-            }
-            break;
+    for (size_t i = 0; i < total; i++) {
+        if (all[i].cpu_percent > 0.0) {
+            insert_top(out, cap, &count, &all[i]);
         }
-
-        int pid;
-        if (parse_pid(entry->d_name, &pid) != 0) {
-            continue;
-        }
-
-        struct process_cpu_stat current;
-        if (read_process_stat(pid, &current) != 0) {
-            continue;
-        }
-        total++;
-
-        const struct process_cpu_counter *old = find_previous(previous, pid);
-        if (old == NULL || old->starttime != current.starttime || current.ticks < old->ticks) {
-            continue;
-        }
-
-        uint64_t delta_ticks = current.ticks - old->ticks;
-        if (delta_ticks == 0) {
-            continue;
-        }
-
-        struct process_cpu_info candidate = {
-            .pid = current.pid,
-            .cpu_percent = (double)delta_ticks * 100.0 / (double)system_delta_ticks,
-        };
-        memcpy(candidate.name, current.name, sizeof(candidate.name));
-        candidate.name[sizeof(candidate.name) - 1] = '\0';
-        insert_top(out, cap, &count, &candidate);
     }
 
-    if (closedir(dir) != 0) {
-        return -1;
-    }
-
+    process_cpu_info_free(all);
     *out_count = count;
     *out_total = total;
     return 0;
