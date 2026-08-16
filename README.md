@@ -1,18 +1,22 @@
 # RookieTop
 
-RookieTop is a beginner-first Linux system monitor written in C.
+**Learn Linux by watching your own system work.**
 
-It aims to answer three questions clearly:
+RookieTop is a beginner-first Linux system monitor and interactive teaching tool written in C. It uses the machine you are currently running as the lesson instead of separating monitoring from learning.
 
-1. **What is happening?**
-2. **Should I care?**
-3. **How does Linux expose this information?**
+RookieTop aims to answer four questions:
 
-RookieTop reads Linux interfaces such as `/proc`, `/sys`, and small POSIX/Linux APIs directly instead of hiding system state behind a metrics framework.
+1. **What am I looking at?**
+2. **Why does it matter?**
+3. **How does Linux expose it?**
+4. **What can I try myself?**
+
+It reads Linux interfaces such as `/proc`, `/sys`, `statvfs()`, and `kill(2)` directly rather than hiding system state behind a metrics framework or shelling out to tools such as `ps`, `free`, or `df`.
 
 ## Project principles
 
-- **Beginner-first output.** Human meaning before raw numbers.
+- **Teaching first.** A number without meaning is not enough.
+- **Your system is the textbook.** Lessons use live values and real processes from the current machine.
 - **Low-level implementation.** Learn from Linux interfaces directly.
 - **Small code over clever code.** Prefer the shortest correct implementation that remains readable.
 - **Zero daemon, zero database.** One local process and one binary for the core monitor.
@@ -22,64 +26,96 @@ RookieTop reads Linux interfaces such as `/proc`, `/sys`, and small POSIX/Linux 
 
 ## Alpha features
 
-`0.1.0-alpha.5` includes:
+`0.1.0-alpha.6` includes:
 
 - aggregate CPU usage from `/proc/stat`
 - memory and swap from `/proc/meminfo` using `MemAvailable`
 - root filesystem capacity through `statvfs()`
 - aggregate non-loopback network throughput from `/proc/net/dev`
 - host name, kernel release, online CPU count, uptime, and load average
-- optional hottest thermal zone discovery from `/sys/class/thermal`
-- top current CPU-consuming processes sampled from `/proc/<pid>/stat`
+- optional thermal-zone discovery from `/sys/class/thermal`
+- top current CPU-consuming processes from `/proc/<pid>/stat`
 - top memory-consuming processes from `/proc/<pid>/status`
 - short CPU and memory activity history held in a fixed in-memory buffer
-- full-screen interactive terminal dashboard using ANSI escape sequences
-- process explorer using raw `termios` + `poll` + `read` keyboard input
-- process details including PID, RSS, state, thread count, and command line
-- process sorting by memory, PID, or name
-- confirmed SIGTERM and separately confirmed SIGKILL actions
-- PID-reuse protection by verifying `/proc/<pid>/stat` start time before signalling
+- full-screen ANSI terminal UI with raw `termios` + `poll` + `read` input
+- all-process explorer with selection, sorting, inspection, and beginner-readable process states
+- process details including PID, RSS, state, thread count, command line, and their procfs sources
+- confirmed **Safe Stop** via SIGTERM and separately confirmed **Force Kill** via SIGKILL
+- PID-reuse protection by verifying `/proc/<pid>/stat` start time immediately before signalling
 - explicit permission / exited / PID-reused feedback instead of auto-sudo
+- teaching catalog for CPU, memory, load, processes, PIDs, process states, signals, disk, and network
+- contextual process lessons using the process currently selected by the user
 - terminal-size-aware layout via `ioctl(TIOCGWINSZ)`
-- alternate screen buffer so the previous shell screen is restored on exit
-- semantic health colors and beginner-readable insight
-- automatic terminal cleanup on `Ctrl+C` / `SIGTERM`
-- compact fallback for smaller terminals
-- one-shot output for scripts and CI
-- `NO_COLOR` support and plain non-TTY output
+- alternate screen buffer and terminal cleanup on exit
+- `NO_COLOR` and non-TTY / `--once` support
 
-### Interactive keys
+## Teaching model
+
+Press `?` from RookieTop and choose a concept. Every lesson follows the same structure:
+
+```text
+WHAT
+    What is this concept?
+
+WHY IT MATTERS
+    When should I care?
+
+HOW LINUX / ROOKIETOP KNOWS
+    Which procfs/sysfs/syscall interface exposes it?
+
+TRY IT YOURSELF
+    A small experiment to run on this machine.
+```
+
+For example, the CPU lesson does not stop at `CPU 32%`. It explains that Linux exposes cumulative counters in `/proc/stat`, that RookieTop calculates usage from two samples, and then suggests generating a temporary CPU load so the user can observe the metric change.
+
+The process explorer works the same way. A selected `Sleeping` process is explained as a process normally waiting for work rather than being presented only as the raw `S` kernel state code. Press `?` on that process to connect its PID, RSS, state, and thread count back to `/proc/<pid>/`.
+
+## Interactive keys
 
 From the overview:
 
 ```text
-p        process explorer
-q        quit
+? / l    Learn using live system data
+p        Process Explorer
+q        Quit
 ```
 
-Inside the process explorer:
+Inside Process Explorer:
 
 ```text
-Up/Down  select process
-Enter    inspect process
-m        sort by memory
-p        sort by PID
-n        sort by name
-k        request graceful stop with SIGTERM
-K        request force stop with SIGKILL
-Esc      return to overview
-q        quit
+Up/Down  Select process
+?        Explain the selected process
+Enter    Inspect process and its Linux data sources
+m        Sort by memory
+p        Sort by PID
+n        Sort by name
+k        Safe Stop with SIGTERM
+K        Force Kill with SIGKILL
+Esc      Back
+q        Quit
 ```
 
-RookieTop never escalates SIGTERM to SIGKILL automatically. `K` is intentionally a separate action with a separate confirmation because SIGKILL prevents a process from running cleanup handlers.
+Inside the lesson browser:
 
-### Metric semantics
+```text
+Up/Down  Choose concept
+Enter    Open lesson
+n        Next lesson
+b        Previous lesson
+Esc      Back
+```
 
-RookieTop deliberately explains metrics that are easy to misread:
+RookieTop never escalates SIGTERM to SIGKILL automatically. `K` is intentionally a separate action and confirmation because SIGKILL prevents the process from running cleanup handlers.
+
+## Metric semantics
+
+RookieTop deliberately teaches metrics that are easy to misread:
 
 - **Memory** uses `MemAvailable`; Linux filesystem cache is not treated as wasted RAM.
-- **Process CPU** is the process share of total machine CPU time during the sample window. A single process therefore cannot exceed 100% in RookieTop.
-- **Load average** is queue pressure relative to online CPUs. It includes runnable work and tasks waiting in uninterruptible sleep, so it is not another CPU percentage.
+- **Process CPU** is the process share of total machine CPU time during the sample window.
+- **Load average** is queue pressure relative to online CPUs, not another CPU percentage.
+- **Process state** is translated into beginner-readable meaning; for example, `Sleeping` is commonly a normal waiting state.
 - **Thermal** is optional because many VMs and some systems do not expose thermal zones through sysfs.
 
 See [`docs/SCOPE.md`](docs/SCOPE.md), [`docs/ROADMAP.md`](docs/ROADMAP.md), and [`docs/VM-TEST.md`](docs/VM-TEST.md).
@@ -97,9 +133,7 @@ make
 ./rookietop
 ```
 
-In an interactive terminal, `./rookietop` opens a full-screen dashboard. Press `p` for the process explorer or `Ctrl+C` to quit; the original terminal screen and terminal mode are restored automatically.
-
-For one snapshot:
+For a non-interactive snapshot:
 
 ```sh
 ./rookietop --once
@@ -119,4 +153,4 @@ make clean check
 
 ## Status
 
-Alpha 5 adds interactive process inspection and safe process signalling while keeping the core model: one local binary, no daemon, no root escalation, no ncurses, and no metrics framework. The larger visual redesign remains intentionally separate so it can follow a dedicated TUI mockup rather than another guessed layout.
+Alpha 6 establishes the first **Teaching Engine**. RookieTop now treats explanation and experimentation as first-class interaction rather than footer documentation. The larger visual redesign can continue from a dedicated TUI mockup without changing the teaching model or low-level collectors.

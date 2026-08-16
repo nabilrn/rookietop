@@ -37,7 +37,7 @@ Goal: establish the smallest reliable C project.
 - [x] calculate RX/TX rates from sample deltas
 - [x] degrade gracefully when counters regress or interface state changes
 
-## Phase 4 — Processes
+## Phase 4 — Processes + safe actions
 
 - [x] enumerate numeric `/proc/<pid>` entries
 - [x] parse only fields RookieTop displays
@@ -49,9 +49,10 @@ Goal: establish the smallest reliable C project.
 - [x] interactive all-process explorer
 - [x] process detail view with state, threads, RSS, and command line
 - [x] sort process explorer by memory, PID, or name
-- [x] confirmed SIGTERM action
-- [x] separately confirmed SIGKILL action
-- [x] verify process start time again immediately before signalling
+- [x] confirmed Safe Stop with SIGTERM
+- [x] separately confirmed Force Kill with SIGKILL
+- [x] verify process start time immediately before signalling
+- [x] explain SIGTERM vs SIGKILL before an action
 - [ ] process name search/filter
 - [ ] all-process CPU column and CPU sorting
 
@@ -72,7 +73,28 @@ The CPU sampler uses short-lived allocation only to match PIDs across the sampli
 - [x] non-TTY and `--once` one-shot fallback
 - [x] raw keyboard input using termios/poll/read
 - [ ] dedicated visual redesign from a TUI mockup
-- [ ] optional interactive explanation / `? Why?` view
+
+## Phase 5.5 — Teaching Engine
+
+Goal: make RookieTop a Linux learning environment, not merely a monitor with explanatory labels.
+
+- [x] `?` / `l` learning entry point from live overview
+- [x] static teaching catalog kept separate from collectors
+- [x] WHAT → WHY → HOW → TRY lesson structure
+- [x] lessons for CPU, memory, load average, processes, PID, process states, signals, disk, and network
+- [x] show live machine values inside relevant lessons
+- [x] expose the actual procfs/sysfs/syscall data source in each lesson
+- [x] provide a small local experiment for each concept
+- [x] translate raw process-state codes into beginner-readable states
+- [x] selected-process teaching panel in Process Explorer
+- [x] contextual process lesson using the selected PID/state/RSS/threads
+- [x] Process Inspector connects fields back to `/proc/<pid>/`
+- [x] Safe Stop / Force Kill confirmations teach signal semantics
+- [x] teaching catalog tests and sanitizer coverage
+- [ ] context-aware `Why is this high?` diagnosis using the current top contributors
+- [ ] optional guided mini-labs with completion state
+
+Teaching content must not duplicate collector logic. Lessons consume normalized live data and explain where that data originated.
 
 ## Phase 6 — Localization
 
